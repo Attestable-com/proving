@@ -7,8 +7,8 @@
     "pad_to_component_log_sizes": {
         "eq": 20,
         "qm31_ops": 23,
-        "m31_to_u32": 21,
-        "triple_xor": 20,
+        "m31_to_u32": 20,
+        "triple_xor": 19,
         "blake_g_gate": 23
     },
     "add_zk_blinding": false

@@ -7,7 +7,7 @@
       "log_blowup_factor": 1,
       "log_last_layer_degree_bound": 0,
       "n_queries": 70,
-      "fold_step": 1
+      "fold_step": 4
     },
     "preprocessed_trace": "canonical_small",
     "store_polynomials_coefficients": false,
@@ -29,7 +29,7 @@
         "qm31_ops": 23,
         "m31_to_u32": 20,
         "triple_xor": 19,
-        "blake_g_gate": 23
+        "blake_g_gate": 22
       }
     }
   },
@@ -38,24 +38,24 @@
       "config": "default",
       "trace_log_size": 20,
       "preprocessed_root": [
-        "0x610ef4f7",
-        "0x64146c6a",
-        "0x72ddd0d6",
-        "0x4a100b41",
-        "0x34a6b1d5",
-        "0xfd24dc36",
-        "0xb9a346d7",
-        "0x05d51641"
+        "0xe88d1044",
+        "0x62398b95",
+        "0xbca0f58c",
+        "0x5baebd61",
+        "0xed12334b",
+        "0x448358f6",
+        "0xb956dd48",
+        "0x2f3dee33"
       ],
       "circuit_hash": [
-        "0x37796028",
-        "0x4fe9d8f2",
-        "0xc6de0c66",
-        "0x2b50b787",
-        "0x81bb0fa5",
-        "0xd32c704e",
-        "0x94dcf0b1",
-        "0x443740f8"
+        "0x736f2a1d",
+        "0xc79d6044",
+        "0xa929cb71",
+        "0x14875013",
+        "0xa7d07d0d",
+        "0x4ad556ec",
+        "0xff00e676",
+        "0xa417eb09"
       ],
       "zk_blinding": false
     }
@@ -68,24 +68,24 @@
         "default"
       ],
       "preprocessed_root": [
-        "0xc93462b9",
-        "0xd0b677ba",
-        "0x3869cc57",
-        "0xa75fd647",
-        "0xa32bdcbc",
-        "0x39aea183",
-        "0x8031b4d2",
-        "0x508e3bb8"
+        "0x423d20f4",
+        "0x312143fc",
+        "0x0efe65d0",
+        "0xaa8616b7",
+        "0xd2025eca",
+        "0x235a7ff5",
+        "0xe6551f2c",
+        "0xd96b8cd0"
       ],
       "circuit_hash": [
-        "0xec9868a7",
-        "0xe9acb971",
-        "0xaa6fde55",
-        "0x912cdacd",
-        "0x11eb6429",
-        "0x85450436",
-        "0x424f6b43",
-        "0x6e66e2fe"
+        "0x27952554",
+        "0xe75f2d17",
+        "0xa1b4feba",
+        "0x1600442a",
+        "0x306012c1",
+        "0x2d5e8532",
+        "0x2dc73e99",
+        "0x449ee3ce"
       ]
     }
   ]

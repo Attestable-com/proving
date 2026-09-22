@@ -7,7 +7,7 @@
       "log_blowup_factor": 1,
       "log_last_layer_degree_bound": 0,
       "n_queries": 70,
-      "fold_step": 1
+      "fold_step": 4
     },
     "preprocessed_trace": "canonical_small",
     "store_polynomials_coefficients": false,
@@ -27,8 +27,8 @@
       "component_log_sizes": {
         "eq": 20,
         "qm31_ops": 23,
-        "m31_to_u32": 21,
-        "triple_xor": 20,
+        "m31_to_u32": 20,
+        "triple_xor": 19,
         "blake_g_gate": 23
       }
     }
@@ -38,24 +38,24 @@
       "config": "default",
       "trace_log_size": 20,
       "preprocessed_root": [
-        "0x68bf6d10",
-        "0xad9aa735",
-        "0x736a0166",
-        "0xd59b6c7b",
-        "0x2768d4ad",
-        "0x30729c3a",
-        "0x3e186f5e",
-        "0xb92d7b69"
+        "0xee98c388",
+        "0xe7e70587",
+        "0xad2701a4",
+        "0x66815d07",
+        "0xc7095eb5",
+        "0xe46c2f5c",
+        "0x17e8021b",
+        "0xd233ba85"
       ],
       "circuit_hash": [
-        "0xd6aadb96",
-        "0x82d884c1",
-        "0x2cd04c0a",
-        "0xf5324491",
-        "0xf08cfd1b",
-        "0x82c42393",
-        "0x7973f065",
-        "0xf4312620"
+        "0xf44bd726",
+        "0xfd8de034",
+        "0x6994c38d",
+        "0x82069e15",
+        "0xf7fda39b",
+        "0xa8492f29",
+        "0x6b0ef0a1",
+        "0x7e390788"
       ],
       "zk_blinding": false
     }
@@ -68,24 +68,24 @@
         "default"
       ],
       "preprocessed_root": [
-        "0xdf179a47",
-        "0x18c992b6",
-        "0x0ab59f83",
-        "0xbe909f41",
-        "0x79e0aa1b",
-        "0x6cddd41d",
-        "0xd2def9bd",
-        "0xe9bc6b2a"
+        "0xb24d421d",
+        "0x62045271",
+        "0x40ef22b1",
+        "0x6e948164",
+        "0xe3336e1f",
+        "0x788a2a69",
+        "0x986f3334",
+        "0x0c63e473"
       ],
       "circuit_hash": [
-        "0x33d747f0",
-        "0x44f527b3",
-        "0x7bda6963",
-        "0x6c7ac112",
-        "0x364bed44",
-        "0xe1cf0197",
-        "0xb9697be1",
-        "0xf4b8728e"
+        "0x433da9bd",
+        "0xfc21aa02",
+        "0x9bfe9bc7",
+        "0x4bbc88d2",
+        "0xcf33e381",
+        "0x604ad86b",
+        "0x1c64fa73",
+        "0xf719b5a8"
       ]
     }
   ]

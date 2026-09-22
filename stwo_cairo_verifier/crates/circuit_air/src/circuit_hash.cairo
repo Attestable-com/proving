@@ -67,8 +67,8 @@ mod tests {
         let log_blowup_factor = 1;
         let preprocessed_root = Blake2sHash { hash: BoxImpl::new([0, 1, 2, 3, 4, 5, 6, 7]) };
         let expected: [u32; BLAKE2S_DIGEST_N_WORDS] = [
-            0xe9b7a49b, 0x1d82e3df, 0xdb9f0833, 0xf630790b, 0xd00f16a5, 0xab64b8f6, 0x6908b712,
-            0xbcc5fe3a,
+            0x5b6cadf2, 0x78860d2c, 0xde9b6924, 0xf656020c, 0xc965e2b2, 0x0bb57f82, 0x9236ceb4,
+            0x388feeb7,
         ];
         assert!(
             compute_circuit_hash(log_blowup_factor, preprocessed_root).hash.unbox() == expected,

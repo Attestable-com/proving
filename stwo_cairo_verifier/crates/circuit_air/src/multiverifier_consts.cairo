@@ -34,8 +34,8 @@ pub fn circuit_fri_config() -> FriConfig {
 pub const COMPONENT_LOG_SIZES: PerComponent<u32> = PerComponent {
     eq: 20,
     qm31_ops: 23,
-    triple_xor: 20,
-    m_31_to_u_32: 21,
+    triple_xor: 19,
+    m_31_to_u_32: 20,
     blake_g_gate: 23,
     verify_bitwise_xor_8: 16,
     verify_bitwise_xor_12: 20,
@@ -64,19 +64,19 @@ pub const PREPROCESSED_COLUMN_LOG_SIZES: [u32; 45] = [
     COMPONENT_LOG_SIZES.verify_bitwise_xor_9, // bitwise_xor_9_0
     COMPONENT_LOG_SIZES.verify_bitwise_xor_9, // bitwise_xor_9_1
     COMPONENT_LOG_SIZES.verify_bitwise_xor_9, // bitwise_xor_9_2
-    COMPONENT_LOG_SIZES.eq, // eq_in0_address
-    COMPONENT_LOG_SIZES.eq, // eq_in1_address
     COMPONENT_LOG_SIZES.triple_xor, // triple_xor_input_addr_0
     COMPONENT_LOG_SIZES.triple_xor, // triple_xor_input_addr_1
     COMPONENT_LOG_SIZES.triple_xor, // triple_xor_input_addr_2
     COMPONENT_LOG_SIZES.triple_xor, // triple_xor_output_addr
     COMPONENT_LOG_SIZES.triple_xor, // triple_xor_multiplicity
-    COMPONENT_LOG_SIZES.verify_bitwise_xor_12, // bitwise_xor_10_0
-    COMPONENT_LOG_SIZES.verify_bitwise_xor_12, // bitwise_xor_10_1
-    COMPONENT_LOG_SIZES.verify_bitwise_xor_12, // bitwise_xor_10_2
+    COMPONENT_LOG_SIZES.eq, // eq_in0_address
+    COMPONENT_LOG_SIZES.eq, // eq_in1_address
     COMPONENT_LOG_SIZES.m_31_to_u_32, // m31_to_u32_input_addr
     COMPONENT_LOG_SIZES.m_31_to_u_32, // m31_to_u32_output_addr
     COMPONENT_LOG_SIZES.m_31_to_u_32, // m31_to_u32_multiplicity
+    COMPONENT_LOG_SIZES.verify_bitwise_xor_12, // bitwise_xor_10_0
+    COMPONENT_LOG_SIZES.verify_bitwise_xor_12, // bitwise_xor_10_1
+    COMPONENT_LOG_SIZES.verify_bitwise_xor_12, // bitwise_xor_10_2
     COMPONENT_LOG_SIZES.qm31_ops, // qm31_ops_add_flag
     COMPONENT_LOG_SIZES.qm31_ops, // qm31_ops_sub_flag
     COMPONENT_LOG_SIZES.qm31_ops, // qm31_ops_mul_flag

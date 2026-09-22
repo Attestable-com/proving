@@ -189,7 +189,7 @@ impl AirFn for PartialECMulGeneric {
                             accumulator[j].get_felt(i),
                             accumulator_with_add[j].get_felt(i),
                         ),
-                        &format!("new_acculumator_{j}_{i}"),
+                        &format!("new_accumulator_{j}_{i}"),
                     )
                 })
                 .collect::<Vec<_>>()

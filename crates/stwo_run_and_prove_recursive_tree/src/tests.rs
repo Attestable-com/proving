@@ -213,6 +213,7 @@ fn test_simple_output_program_hash_snapshot() {
 
 #[cfg(feature = "slow-tests")]
 mod e2e {
+    use std::num::NonZeroUsize;
     use std::path::{Path, PathBuf};
 
     use blake2::{Blake2s256, Digest};
@@ -422,6 +423,7 @@ mod e2e {
             &dir.join("root.proof"),
             &dir.join("root_outputs.json"),
             &dir.join("root_packed.json"),
+            NonZeroUsize::new(1).unwrap(),
         )
         .unwrap();
 

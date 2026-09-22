@@ -4,6 +4,7 @@
 //! the three root output paths; the rest of the proving configuration is fixed by the canonical
 //! circuit shape (see `canonical`).
 
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -45,6 +46,10 @@ struct Args {
     /// multiverifier hash the canonical circuit is checked against.
     #[clap(long = "circuit_registry_json")]
     circuit_registry_json: PathBuf,
+
+    /// Maximum number of pair reductions proven in parallel within a layer.
+    #[clap(long = "max_concurrency", default_value_t = NonZeroUsize::new(1).unwrap())]
+    max_concurrency: NonZeroUsize,
 }
 
 fn main() -> ExitCode {
@@ -63,6 +68,7 @@ fn run() -> Result<(), RecursiveTreeError> {
         &args.proof_path,
         &args.program_output,
         &args.packed_output_path,
+        args.max_concurrency,
     )?;
     info!(
         n_layers = stats.n_layers,

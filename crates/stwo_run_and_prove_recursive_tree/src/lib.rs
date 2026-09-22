@@ -26,6 +26,7 @@
 //! `Composite` verifier nodes down to each leaf's `Plain` node carrying the raw hashed-output
 //! preimage, from which a future unpacker recomputes every digest in the tree.
 
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 
 use circuit_registry::{CircuitRegistry, DigestHex, RegistryError};
@@ -88,16 +89,21 @@ pub struct RecursiveTreeStats {
 /// - `proof_path`: the root proof — the Cairo circuit verifier's felt252 arguments stream.
 /// - `program_output`: the root node's output values (flat JSON array of raw `u32` digest words).
 /// - `packed_output_path`: the nested `PackedNode` JSON tree.
-///
 /// - `registry`: the circuit registry, which MUST be the one the leaves were proven against.
+/// - `max_concurrency`: upper bound on the number of pair reductions to run in parallel within a
+///   single layer.
 pub fn stwo_run_and_prove_recursive_tree(
     leaves: Vec<LeafInput>,
     registry: &CircuitRegistry,
     proof_path: &Path,
     program_output: &Path,
     packed_output_path: &Path,
+    max_concurrency: NonZeroUsize,
 ) -> Result<RecursiveTreeStats, RecursiveTreeError> {
     let _span = span!(Level::INFO, "stwo_run_and_prove_recursive_tree").entered();
+    // Note: max_concurrency is currently no-op (the fold below is strictly sequential). Parameter
+    // will drive intra-layer parallelism in a follow-up PR.
+    let _ = max_concurrency;
 
     if leaves.is_empty() {
         return Err(RecursiveTreeError::EmptyLeaves);

@@ -15,9 +15,10 @@
 //! trace size for the leaf circuit and once (at the largest size) for the multiverifier.
 //!
 //! With `--registry`, instead writes the registry JSON: the params above, the shared target sizes
-//! and every circuit's hash — everything a binary proving these circuits needs. Only this mode
-//! commits the real Cairo preprocessed root per trace size (it is baked into the leaf circuit, so
-//! the hashes depend on it).
+//! and every circuit's hash — everything a binary proving these circuits needs.
+//!
+//! Both modes commit the real Cairo preprocessed root per trace size — the most expensive step
+//! here — so the leaf circuits they build are exactly the ones the registry records.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -26,14 +27,16 @@ use std::process::ExitCode;
 use circuit_cairo_verifier::utils::load_program;
 use circuit_common::finalize::ComponentSizes;
 use circuit_params::{
-    CircuitsBuilder, DUMMY_PREPROCESSED_ROOT, RegistryDefinition, multiverifier_context_for_sizes,
+    CircuitsBuilder, RegistryDefinition, multiverifier_context_for_sizes,
     padded_preprocessed_circuit, padded_shared_target, raw_and_padded_component_sizes, read_params,
 };
 use circuit_prover::circuit_hash::circuit_hash_and_preprocessed_root;
 use circuit_registry::{
     CircuitProofConfig, CircuitRegistry, DigestHex, LeafVerifier, Multiverifier,
 };
+use circuits::blake::HashValue;
 use clap::Parser;
+use stwo::core::fields::qm31::QM31;
 use stwo::core::fri::FriConfig;
 use stwo_cairo_prover::prover::ProverParameters;
 use stwo_cairo_utils::binary_utils::run_binary;
@@ -100,13 +103,22 @@ fn run() -> Result<(), String> {
     };
     let trace_log_sizes = definition.min_trace_log_size..=definition.max_trace_log_size;
 
-    // Pass 1: every leaf circuit's component sizes. Built with a dummy Cairo root and dropped as
-    // soon as its sizes are read, so only one leaf circuit is ever in memory.
+    // The verified Cairo proofs' preprocessed roots, committed once per trace size and baked into
+    // the leaf circuit both passes build.
+    let cairo_roots: BTreeMap<u32, HashValue<QM31>> = trace_log_sizes
+        .clone()
+        .map(|trace_log_size| {
+            (trace_log_size, circuits_builder.cairo_preprocessed_root(trace_log_size))
+        })
+        .collect();
+
+    // Pass 1: every leaf circuit's component sizes. Each leaf is dropped as soon as its sizes are
+    // read, so only one is ever in memory.
     let leaf_sizes: BTreeMap<u32, (ComponentSizes, ComponentSizes)> = trace_log_sizes
         .clone()
         .map(|trace_log_size| {
-            let context =
-                circuits_builder.build_leaf_context(trace_log_size, DUMMY_PREPROCESSED_ROOT.into());
+            let context = circuits_builder
+                .build_leaf_context(trace_log_size, cairo_roots[&trace_log_size].clone());
             (trace_log_size, raw_and_padded_component_sizes(&context))
         })
         .collect();
@@ -140,10 +152,8 @@ fn run() -> Result<(), String> {
         let leaf_verifiers = trace_log_sizes
             .clone()
             .map(|trace_log_size| {
-                let context = circuits_builder.build_leaf_context(
-                    trace_log_size,
-                    circuits_builder.cairo_preprocessed_root(trace_log_size),
-                );
+                let context = circuits_builder
+                    .build_leaf_context(trace_log_size, cairo_roots[&trace_log_size].clone());
                 let (circuit_hash, preprocessed_root) = circuit_hash_and_preprocessed_root(
                     &padded_preprocessed_circuit(context, &target_sizes),
                     circuit_log_blowup_factor,

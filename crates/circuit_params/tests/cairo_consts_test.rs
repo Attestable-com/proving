@@ -11,9 +11,11 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-use circuit_common::finalize::ComponentSizes;
-use circuit_common::preprocessed::layout_from_component_sizes;
-use circuit_params::RegistryDefinition;
+use circuit_cairo_verifier::utils::load_program;
+use circuit_common::finalize::{ComponentSizes, compute_padded_sizes};
+use circuit_common::preprocessed::{PreprocessedCircuit, layout_from_component_sizes};
+use circuit_params::{CircuitsBuilder, RegistryDefinition, padded_shared_target};
+use circuits::blake::HashValue;
 use stwo::core::fri::FriConfig;
 
 const BEGIN_MARKER: &str =
@@ -22,6 +24,38 @@ const END_MARKER: &str = "// === END GENERATED ===";
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+/// `definition`'s shared padding target and the multiverifier padded to it: the elementwise max
+/// over the leaf circuits of its trace range, closed under the multiverifier fixpoint.
+///
+/// Builds each leaf's topology with a dummy Cairo root, which the padded sizes do not depend on.
+/// That keeps this test cheap — the binary commits the real roots instead, at a cost this test
+/// does not want to pay per run.
+// TODO(yair): Consider using the real roots, as the binary does, and moving this test to
+// `slow-tests`: a dummy cannot guarantee the same target sizes, however unlikely a difference.
+fn shared_target(definition: &RegistryDefinition) -> (ComponentSizes, PreprocessedCircuit) {
+    let cairo_params = definition.cairo_params();
+    let circuits_builder = CircuitsBuilder {
+        cairo_preprocessed_trace_variant: cairo_params.preprocessed_trace,
+        leaf_program: load_program(&definition.program),
+        cairo_fri_config: cairo_params.fri_config,
+        circuit_fri_config: definition.circuit_fri_config(),
+        add_zk_blinding: definition.add_zk_blinding,
+    };
+    let leaves_max_sizes = (definition.min_trace_log_size..=definition.max_trace_log_size)
+        .map(|trace_log_size| {
+            let dummy_root = HashValue::from([0; 8]);
+            let context = circuits_builder.build_leaf_context(trace_log_size, dummy_root);
+            compute_padded_sizes(&context)
+        })
+        .reduce(|a, b| a.elementwise_max(&b))
+        .expect("the trace range is non-empty");
+    padded_shared_target(
+        leaves_max_sizes,
+        definition.circuit_fri_config(),
+        definition.pad_to_component_log_sizes.as_ref(),
+    )
 }
 
 fn circuit_air_src() -> PathBuf {
@@ -241,7 +275,7 @@ fn test_cairo_verifier_consts_match_production_registry() {
     let production = RegistryDefinition::load(&repo_root(), "production");
     // TODO(yair): Add a sizes-only shared-target variant; the discarded multiverifier's
     // preprocessed trace is the bulk of this test's memory.
-    let (target_sizes, _preprocessed_multiverifier) = production.shared_target();
+    let (target_sizes, _preprocessed_multiverifier) = shared_target(&production);
     let fri_config = production.circuit_fri_config();
     assert_generated_section(
         "multiverifier_consts.cairo",

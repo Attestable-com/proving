@@ -4,14 +4,12 @@
 //! circuit shape verifies proofs of any of them.
 //!
 //! The `circuit-params` binary uses these to emit the registry (see `main.rs`); tests use them to
-//! derive its circuits' shape (e.g. [`RegistryDefinition::shared_target`]) without committing
-//! anything.
+//! derive its circuits' shape without committing anything.
 
 use std::path::Path;
 use std::sync::Arc;
 
 use circuit_cairo_verifier::statement::MEMORY_VALUES_LIMBS;
-use circuit_cairo_verifier::utils::load_program;
 use circuit_cairo_verifier::verify::{NON_QUERY_INFO_LEAK, build_cairo_verifier_circuit};
 use circuit_common::finalize::{
     ComponentSizes, compute_padded_sizes, pad_to_targets, raw_component_sizes,
@@ -33,9 +31,6 @@ use stwo_cairo_common::prover_types::cpu::M31;
 use stwo_cairo_prover::prover::ProverParameters;
 use stwo_cairo_prover::witness::prelude::QM31;
 use stwo_cairo_prover::witness::preprocessed_trace::generate_preprocessed_commitment_root;
-
-/// A stand-in for the Cairo preprocessed root, for the passes that only read component sizes.
-pub const DUMMY_PREPROCESSED_ROOT: [u32; 8] = [0; 8];
 
 /// Reads a prover params JSON file.
 pub fn read_params<T: serde::de::DeserializeOwned>(path: &Path) -> T {
@@ -244,34 +239,5 @@ impl RegistryDefinition {
 
     pub fn circuit_fri_config(&self) -> FriConfig {
         read_params(&self.circuit_fri_config_json)
-    }
-
-    /// The registry's shared padding target and the multiverifier padded to it, from the
-    /// definition alone: the elementwise max over the leaf circuits of the trace range, closed
-    /// under the multiverifier fixpoint. Builds circuit topologies with a dummy Cairo root (sizes
-    /// are root-independent), one at a time — no commitment, so this is the cheap part of registry
-    /// generation.
-    pub fn shared_target(&self) -> (ComponentSizes, PreprocessedCircuit) {
-        let cairo_params = self.cairo_params();
-        let circuits_builder = CircuitsBuilder {
-            cairo_preprocessed_trace_variant: cairo_params.preprocessed_trace,
-            leaf_program: load_program(&self.program),
-            cairo_fri_config: cairo_params.fri_config,
-            circuit_fri_config: self.circuit_fri_config(),
-            add_zk_blinding: self.add_zk_blinding,
-        };
-        let leaves_max_sizes = (self.min_trace_log_size..=self.max_trace_log_size)
-            .map(|trace_log_size| {
-                let context = circuits_builder
-                    .build_leaf_context(trace_log_size, DUMMY_PREPROCESSED_ROOT.into());
-                compute_padded_sizes(&context)
-            })
-            .reduce(|a, b| a.elementwise_max(&b))
-            .expect("the trace range is non-empty");
-        padded_shared_target(
-            leaves_max_sizes,
-            self.circuit_fri_config(),
-            self.pad_to_component_log_sizes.as_ref(),
-        )
     }
 }

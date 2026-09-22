@@ -18,7 +18,7 @@ use circuit_common::finalize::{
 };
 use circuit_common::preprocessed::{PreprocessedCircuit, layout_from_component_sizes};
 use circuit_multiverifier::verify::{
-    build_multiverifier_context, build_multiverifier_context_from_shared_config, shared_config,
+    build_multiverifier_context_from_shared_config, shared_config,
 };
 use circuit_registry::LogSizes;
 use circuits::blake::HashValue;
@@ -34,9 +34,7 @@ use stwo_cairo_prover::prover::ProverParameters;
 use stwo_cairo_prover::witness::prelude::QM31;
 use stwo_cairo_prover::witness::preprocessed_trace::generate_preprocessed_commitment_root;
 
-/// A stand-in for the Cairo preprocessed root, for the passes that only read component sizes: the
-/// root ends up in the circuit's constant VALUES, never in its topology, and committing the real
-/// one is the most expensive thing here.
+/// A stand-in for the Cairo preprocessed root, for the passes that only read component sizes.
 pub const DUMMY_PREPROCESSED_ROOT: [u32; 8] = [0; 8];
 
 /// Reads a prover params JSON file.
@@ -48,17 +46,20 @@ pub fn read_params<T: serde::de::DeserializeOwned>(path: &Path) -> T {
 }
 
 /// Non-padded row counts and padded sizes of a circuit context's AIR components.
-pub fn component_sizes(context: &FinalizedContext<NoValue>) -> (ComponentSizes, ComponentSizes) {
+pub fn raw_and_padded_component_sizes(
+    context: &FinalizedContext<NoValue>,
+) -> (ComponentSizes, ComponentSizes) {
     (raw_component_sizes(context), compute_padded_sizes(context))
 }
 
 /// Builds the circuits of one registry definition: holds the definition's inputs (program, prover
 /// params), so that a leaf verifier circuit can be specified and built from just the trace log
 /// size of the Cairo proof it verifies.
-pub struct CircuitBuilder {
-    pub preprocessed_trace: PreProcessedTraceVariant,
+pub struct CircuitsBuilder {
+    /// Preprocessed-trace variant of the verified Cairo proofs.
+    pub cairo_preprocessed_trace_variant: PreProcessedTraceVariant,
     /// The program every leaf proof of these circuits attests to.
-    pub program: Arc<[[M31; MEMORY_VALUES_LIMBS]]>,
+    pub leaf_program: Arc<[[M31; MEMORY_VALUES_LIMBS]]>,
     /// FRI config of the verified Cairo proofs.
     pub cairo_fri_config: FriConfig,
     /// FRI config used to prove the leaf circuits
@@ -67,7 +68,7 @@ pub struct CircuitBuilder {
     pub add_zk_blinding: bool,
 }
 
-impl CircuitBuilder {
+impl CircuitsBuilder {
     /// The verified proofs' PCS config at `trace_log_size`: `cairo_fri_config`, lifted to that
     /// trace.
     pub fn cairo_pcs_config(&self, trace_log_size: u32) -> PcsConfig {
@@ -81,7 +82,7 @@ impl CircuitBuilder {
         let log_blowup_factor = self.cairo_fri_config.log_blowup_factor;
         generate_preprocessed_commitment_root::<Blake2sM31MerkleChannel>(
             log_blowup_factor,
-            self.preprocessed_trace,
+            self.cairo_preprocessed_trace_variant,
             trace_log_size + log_blowup_factor,
         )
         .into()
@@ -89,50 +90,58 @@ impl CircuitBuilder {
 
     /// Builds the leaf verifier circuit topology for a verified Cairo proof of `trace_log_size`,
     /// with `preprocessed_root` baked in.
-    pub fn build_context(
+    pub fn build_leaf_context(
         &self,
         trace_log_size: u32,
         preprocessed_root: HashValue<QM31>,
     ) -> FinalizedContext<NoValue> {
         let verifier_config = leaf_verifier_config(
-            self.preprocessed_trace,
+            self.cairo_preprocessed_trace_variant,
             &self.cairo_pcs_config(trace_log_size),
-            self.program.clone(),
+            self.leaf_program.clone(),
             preprocessed_root,
             self.add_zk_blinding.then_some(self.circuit_fri_config.n_queries + NON_QUERY_INFO_LEAK),
         );
 
         build_cairo_verifier_circuit(&verifier_config)
     }
+}
 
-    /// Builds the multiverifier over the *default-padded* leaf circuit for `trace_log_size` —
-    /// only for the sizes report; the registry pads the leaf to the shared target first (see
-    /// [`shared_target_fixpoint`]).
-    pub fn build_multiverifier_context_for_trace(
-        &self,
-        trace_log_size: u32,
-        circuit_fri_config: FriConfig,
-    ) -> FinalizedContext<NoValue> {
-        let mut leaf_context = self.build_context(trace_log_size, DUMMY_PREPROCESSED_ROOT.into());
-
-        let preprocessed_leaf = PreprocessedCircuit::preprocess_circuit(&mut leaf_context);
-        build_multiverifier_context(
-            &preprocessed_leaf,
-            PcsConfig::from_fri_and_trace_size(
-                circuit_fri_config,
-                preprocessed_leaf.trace_log_size(),
-            ),
-        )
-    }
+/// The multiverifier that verifies proofs of circuits padded to `sizes`.
+///
+/// The verified proofs' preprocessed layout — hence the multiverifier — is a function of the
+/// padded sizes and the circuit FRI config alone, so no leaf circuit is built or preprocessed
+/// here. This is how the recursive tree derives its multiverifier too.
+pub fn multiverifier_context_for_sizes(
+    sizes: &ComponentSizes,
+    circuit_fri_config: FriConfig,
+) -> FinalizedContext<NoValue> {
+    let preprocessed_column_log_sizes = layout_from_component_sizes(sizes);
+    let trace_log_size =
+        *preprocessed_column_log_sizes.values().max().expect("the layout is non-empty");
+    build_multiverifier_context_from_shared_config(&shared_config(
+        preprocessed_column_log_sizes,
+        PcsConfig::from_fri_and_trace_size(circuit_fri_config, trace_log_size),
+    ))
 }
 
 /// Pads `context` to the shared `target_sizes` and preprocesses it.
+///
+/// Homogeneity: every circuit padded to one target must come out with that target's preprocessed
+/// layout — the layout the multiverifier verifies — so a registry's circuits cannot silently
+/// diverge in shape.
 pub fn padded_preprocessed_circuit(
     mut context: FinalizedContext<NoValue>,
     target_sizes: &ComponentSizes,
 ) -> PreprocessedCircuit {
     pad_to_targets(&mut context, target_sizes);
-    PreprocessedCircuit::preprocess_circuit(&mut context)
+    let padded = PreprocessedCircuit::preprocess_circuit(&mut context);
+    assert_eq!(
+        padded.preprocessed_trace.log_sizes(),
+        layout_from_component_sizes(target_sizes),
+        "the padded circuit does not have the target's preprocessed layout"
+    );
+    padded
 }
 
 /// Runs [`shared_target_fixpoint`] from the leaves' max, raised to `pad_to` when given: that lets
@@ -175,13 +184,8 @@ pub fn shared_target_fixpoint(
     circuit_fri_config: FriConfig,
 ) -> (ComponentSizes, PreprocessedCircuit) {
     loop {
-        let preprocessed_column_log_sizes = layout_from_component_sizes(&target_sizes);
-        let trace_log_size =
-            *preprocessed_column_log_sizes.values().max().expect("the layout is non-empty");
-        let multiverifier_context = build_multiverifier_context_from_shared_config(&shared_config(
-            preprocessed_column_log_sizes,
-            PcsConfig::from_fri_and_trace_size(circuit_fri_config, trace_log_size),
-        ));
+        let multiverifier_context =
+            multiverifier_context_for_sizes(&target_sizes, circuit_fri_config);
         let grown_sizes =
             target_sizes.elementwise_max(&compute_padded_sizes(&multiverifier_context));
         if grown_sizes == target_sizes {
@@ -249,17 +253,17 @@ impl RegistryDefinition {
     /// generation.
     pub fn shared_target(&self) -> (ComponentSizes, PreprocessedCircuit) {
         let cairo_params = self.cairo_params();
-        let circuit_builder = CircuitBuilder {
-            preprocessed_trace: cairo_params.preprocessed_trace,
-            program: load_program(&self.program),
+        let circuits_builder = CircuitsBuilder {
+            cairo_preprocessed_trace_variant: cairo_params.preprocessed_trace,
+            leaf_program: load_program(&self.program),
             cairo_fri_config: cairo_params.fri_config,
             circuit_fri_config: self.circuit_fri_config(),
             add_zk_blinding: self.add_zk_blinding,
         };
         let leaves_max_sizes = (self.min_trace_log_size..=self.max_trace_log_size)
             .map(|trace_log_size| {
-                let context =
-                    circuit_builder.build_context(trace_log_size, DUMMY_PREPROCESSED_ROOT.into());
+                let context = circuits_builder
+                    .build_leaf_context(trace_log_size, DUMMY_PREPROCESSED_ROOT.into());
                 compute_padded_sizes(&context)
             })
             .reduce(|a, b| a.elementwise_max(&b))

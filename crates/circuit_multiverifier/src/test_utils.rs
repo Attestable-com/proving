@@ -13,7 +13,7 @@ use stwo::core::pcs::PcsConfig;
 use stwo::core::vcs::blake2_hash::Blake2sHash;
 use stwo_constraint_framework::preprocessed_columns::PreProcessedColumnId;
 
-use crate::verify::{SharedConfig, build_multiverifier_context};
+use crate::verify::{SharedConfig, build_multiverifier_context_from_shared_config, shared_config};
 
 // Shared test fixtures: config constants, target padding sizes, and helpers used by the
 // multiverifier test modules (`verify_test` and `backward_compatibility_test`).
@@ -125,6 +125,20 @@ pub fn multiverifier_preprocessed_column_log_sizes() -> OrderedHashMap<PreProces
     .into_iter()
     .map(|(id, log_size)| (PreProcessedColumnId { id: id.to_string() }, log_size))
     .collect()
+}
+
+/// Builds the multiverifier circuit topology that verifies two proofs of `preprocessed_leaf`.
+fn build_multiverifier_context(
+    preprocessed_leaf: &PreprocessedCircuit,
+    pcs_config: PcsConfig,
+) -> FinalizedContext<NoValue> {
+    assert_eq!(
+        pcs_config.trace_lifting_log_size,
+        preprocessed_leaf.trace_log_size() + pcs_config.fri_config.log_blowup_factor,
+        "`pcs_config` must be the config of the proofs of the verified circuit"
+    );
+    let shared_config = shared_config(preprocessed_leaf.preprocessed_trace.log_sizes(), pcs_config);
+    build_multiverifier_context_from_shared_config(&shared_config)
 }
 
 /// Builds a `NoValue` multiverifier and preprocesses it. The multiverifier is built by feeding it

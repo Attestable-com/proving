@@ -1,5 +1,4 @@
 use circuit_common::N_RESERVED;
-use circuit_common::preprocessed::PreprocessedCircuit;
 use circuit_verifier::statement::{CircuitStatement, circuit_verifier_proof_config};
 use circuit_verifier::verify::CircuitConfig;
 use circuits::blake::{HashValue, blake2s_u32s};
@@ -106,20 +105,6 @@ pub fn build_multiverifier_circuit<Value: IValue>(
     #[cfg(test)]
     context.circuit().check_yields();
     context
-}
-
-/// Builds the multiverifier circuit topology that verifies two proofs of `preprocessed_leaf`.
-pub fn build_multiverifier_context(
-    preprocessed_leaf: &PreprocessedCircuit,
-    pcs_config: PcsConfig,
-) -> FinalizedContext<NoValue> {
-    assert_eq!(
-        pcs_config.trace_lifting_log_size,
-        preprocessed_leaf.trace_log_size() + pcs_config.fri_config.log_blowup_factor,
-        "`pcs_config` must be the config of the proofs of the verified circuit"
-    );
-    let shared_config = shared_config(preprocessed_leaf.preprocessed_trace.log_sizes(), pcs_config);
-    build_multiverifier_context_from_shared_config(&shared_config)
 }
 
 /// The [`SharedConfig`] for verifying proofs of a circuit with the given preprocessed-trace

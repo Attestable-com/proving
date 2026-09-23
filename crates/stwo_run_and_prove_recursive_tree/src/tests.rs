@@ -206,9 +206,11 @@ fn test_simple_output_program_hash_snapshot() {
 //   FIX=1 cargo test -p stwo-run-and-prove-recursive-tree --release --features slow-tests \
 //     --lib -- test_golden_four_leaves_e2e --test-threads=1
 //
-// The two compiled programs in `test_data/` (`leaf_simple_bootloader_compiled.json`,
-// `simple_output_compiled.json`) are inputs, not goldens; their provenance and pinned program
-// hashes live in the program-hash snapshot section above.
+// The compiled programs are inputs, not goldens: `simple_output_compiled.json` in `test_data/`,
+// and the leaf simple bootloader shared with the privacy flow at
+// `crates/cairo-program-runner-lib/resources/compiled_programs/bootloaders/`. They are compiled
+// from the main starkware repo via `bazel run
+// //src/services/gps/bin/rust/test:compile_cairo_run_programs_with_rust_hints_script`.
 // ------------------------------------------------------------------------------------------------
 
 #[cfg(feature = "slow-tests")]
@@ -272,8 +274,10 @@ mod e2e {
         std::fs::write(&input_path, leaf_bl_input_json(&dump_path)).unwrap();
 
         let leaf = prove_leaf_from_files(
-            &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("test_data/leaf_simple_bootloader_compiled.json"),
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
+                "../cairo-program-runner-lib/resources/compiled_programs/bootloaders/\
+                 leaf_simple_bootloader_compiled.json",
+            ),
             &Some(input_path),
             &circuit_registry_path(),
         );

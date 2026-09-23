@@ -14,7 +14,7 @@ use stwo::core::vcs::blake2_hash::Blake2sHash;
 use stwo::core::vcs_lifted::blake2_merkle::Blake2sMerkleHasher;
 use stwo_constraint_framework::preprocessed_columns::PreProcessedColumnId;
 
-use crate::verify::{SharedConfig, build_multiverifier_context};
+use crate::verify::{SharedConfig, build_multiverifier_context_from_shared_config, shared_config};
 
 // Shared test fixtures: config constants, target padding sizes, and helpers used by the
 // multiverifier test modules (`verify_test` and `backward_compatibility_test`).
@@ -40,11 +40,11 @@ pub const PRIVACY_CAIRO_VERIFIER_OUTPUT_DIGEST: [u32; 8] =
 
 /// The preprocessed root of the privacy Cairo verifier circuit.
 pub const PRIVACY_CAIRO_VERIFIER_PREPROCESSED_ROOT: [u32; 8] =
-    [2148584466, 2382698151, 457595934, 1170971019, 2577130673, 1560042363, 4279004765, 3806063892];
+    [441253039, 3875613392, 928940681, 3427512551, 3617659553, 3418754813, 3338178337, 68552802];
 
 /// The preprocessed root of the multiverifier circuit.
 pub const MULTIVERIFIER_PREPROCESSED_ROOT: [u32; 8] =
-    [1268883877, 213256978, 3644000279, 2357144324, 734149438, 3113839470, 1874459862, 3738996173];
+    [3760681776, 2017370616, 464666940, 2861425099, 658127946, 1813826220, 2131048142, 2618722788];
 /// A multiverifier proof verifying two identical Cairo verifier proofs.
 pub const MULTIVERIFIER_OF_TWO_CAIRO_PROOFS_PATH: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../test_data/circuit_multiverifier/proof.bin");
@@ -126,6 +126,20 @@ pub fn multiverifier_preprocessed_column_log_sizes() -> OrderedHashMap<PreProces
     .into_iter()
     .map(|(id, log_size)| (PreProcessedColumnId { id: id.to_string() }, log_size))
     .collect()
+}
+
+/// Builds the multiverifier circuit topology that verifies two proofs of `preprocessed_leaf`.
+fn build_multiverifier_context(
+    preprocessed_leaf: &PreprocessedCircuit,
+    pcs_config: PcsConfig,
+) -> FinalizedContext<NoValue> {
+    assert_eq!(
+        pcs_config.trace_lifting_log_size,
+        preprocessed_leaf.trace_log_size() + pcs_config.fri_config.log_blowup_factor,
+        "`pcs_config` must be the config of the proofs of the verified circuit"
+    );
+    let shared_config = shared_config(preprocessed_leaf.preprocessed_trace.log_sizes(), pcs_config);
+    build_multiverifier_context_from_shared_config(&shared_config)
 }
 
 /// Builds a `NoValue` multiverifier and preprocesses it. The multiverifier is built by feeding it

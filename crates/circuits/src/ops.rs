@@ -79,6 +79,10 @@ pub trait CircuitOps {
     /// Returns a constant zero with the same shape as `like` (e.g., for [crate::simd::Simd]).
     /// The actual value of `like` is unused.
     fn zero(context: &mut Context<impl IValue>, like: &Self) -> Self;
+
+    /// Returns a constant one with the same shape as `like` (e.g., for [crate::simd::Simd]).
+    /// The actual value of `like` is unused.
+    fn one(context: &mut Context<impl IValue>, like: &Self) -> Self;
 }
 
 impl CircuitOps for Var {
@@ -96,6 +100,10 @@ impl CircuitOps for Var {
 
     fn zero(context: &mut Context<impl IValue>, _like: &Self) -> Self {
         context.zero()
+    }
+
+    fn one(context: &mut Context<impl IValue>, _like: &Self) -> Self {
+        context.one()
     }
 }
 

@@ -12,7 +12,7 @@ use stwo::core::vcs_lifted::verifier::{LOG_PACKED_LEAF_SIZE, PACKED_LEAF_SIZE};
 
 use crate::channel::Channel;
 use crate::circle::{
-    compute_half_coset_points, double_x_simd, generator_point_simd, repeated_double_point_simd,
+    compute_half_coset_points, double_x, generator_point_simd, repeated_double_point_simd,
     sub_points_simd,
 };
 use crate::fri_proof::{FriCommitProof, FriConfig, FriProof, FriWitness};
@@ -304,7 +304,7 @@ fn compute_x_twiddles<Value: IValue>(
         twiddles_per_fold.push(x_coords.iter().map(|x| x.inv(context)).collect());
         // Don't add unused gates in the last iteration.
         if fold_idx != num_folds - 1 {
-            x_coords = x_coords.iter().step_by(2).map(|x| double_x_simd(context, x)).collect();
+            x_coords = x_coords.iter().step_by(2).map(|x| double_x(context, x)).collect();
         }
     }
     twiddles_per_fold

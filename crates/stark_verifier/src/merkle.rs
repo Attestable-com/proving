@@ -180,8 +180,7 @@ pub fn decommit_eval_domain_samples<Value: IValue>(
         };
 
         for query_idx in 0..n_queries {
-            let query_values =
-                data.iter().map(|column_data| column_data[query_idx].clone()).collect_vec();
+            let query_values = data.iter().map(|column_data| column_data[query_idx]).collect_vec();
 
             let sorted = query_sorter.sort(context, query_values);
             let leaf = hash_leaf_m31s(context, &sorted);

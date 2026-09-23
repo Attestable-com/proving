@@ -6,7 +6,7 @@ use stwo::core::fields::qm31::QM31;
 use crate::context::{Context, GuessVar, Var};
 use crate::eval;
 use crate::ivalue::{IValue, NoValue, qm31_from_u32s};
-use crate::ops::{Constant, Guess, guess_m31};
+use crate::ops::{CircuitOps, Constant, Guess, add, guess_m31, mul, sub};
 
 #[cfg(test)]
 #[path = "wrappers_test.rs"]
@@ -16,7 +16,7 @@ pub mod test;
 ///
 /// Using the [Guess] trait on [M31Wrapper] and gates that guarantee that the guessed value is
 /// indeed in the base field `M31`.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct M31Wrapper<T>(T);
 
 impl<T> M31Wrapper<T> {
@@ -40,11 +40,6 @@ impl M31Wrapper<Var> {
     pub fn const_m31(context: &mut Context<impl IValue>, value: M31) -> M31Wrapper<Var> {
         Self(context.constant(value.into()))
     }
-
-    /// Adds a multiplication gate to the circuit, and returns the output variable.
-    pub fn mul(context: &mut Context<impl IValue>, a: Self, b: Self) -> Self {
-        Self(eval!(context, (*a.get()) * (*b.get())))
-    }
 }
 
 impl From<NoValue> for M31Wrapper<NoValue> {
@@ -66,7 +61,7 @@ impl<Value: IValue> Guess<Value> for M31Wrapper<Value> {
     fn guess(&self, context: &mut Context<Value>) -> Self::Target {
         // `guess_m31` constrains the guessed variable to the base field `M31` during
         // finalization, so no further masking is required here.
-        guess_m31(context, self.clone())
+        guess_m31(context, *self)
     }
 }
 
@@ -81,6 +76,28 @@ impl<Value: IValue> Constant<Value> for M31Wrapper<QM31> {
 impl<T: Debug> Debug for M31Wrapper<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "M31({:?})", self.0)
+    }
+}
+
+impl CircuitOps for M31Wrapper<Var> {
+    fn add(context: &mut Context<impl IValue>, a: Self, b: Self) -> Self {
+        Self(add(context, *a.get(), *b.get()))
+    }
+
+    fn sub(context: &mut Context<impl IValue>, a: Self, b: Self) -> Self {
+        Self(sub(context, *a.get(), *b.get()))
+    }
+
+    fn mul(context: &mut Context<impl IValue>, a: Self, b: Self) -> Self {
+        Self(mul(context, *a.get(), *b.get()))
+    }
+
+    fn zero(context: &mut Context<impl IValue>, _like: &Self) -> Self {
+        Self(context.zero())
+    }
+
+    fn one(context: &mut Context<impl IValue>, _like: &Self) -> Self {
+        Self(context.one())
     }
 }
 

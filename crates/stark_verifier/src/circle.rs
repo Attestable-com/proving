@@ -1,7 +1,7 @@
 use circuits::context::{Context, Var};
 use circuits::eval;
 use circuits::ivalue::IValue;
-use circuits::ops::inv;
+use circuits::ops::{CircuitOps, inv};
 use circuits::simd::Simd;
 use circuits::wrappers::M31Wrapper;
 use num_traits::CheckedSub;
@@ -13,17 +13,11 @@ use stwo::core::fields::m31::M31;
 pub mod test;
 
 /// Computes `pi(x) = 2 * x^2 - 1`, which is the x-coordinate of the point `(x, y) + (x, y)`.
-pub fn double_x(context: &mut Context<impl IValue>, value: Var) -> Var {
-    let value_sqr = eval!(context, (value) * (value));
-    eval!(context, ((value_sqr) + (value_sqr)) - (1))
-}
-
-/// Same as [double_x], but for [Simd].
-pub fn double_x_simd(context: &mut Context<impl IValue>, value: &Simd) -> Simd {
-    let value_sqr = Simd::mul(context, value, value);
-    let value_sqr_times2 = Simd::add(context, &value_sqr, &value_sqr);
-    let one = Simd::one(context, value.len());
-    Simd::sub(context, &value_sqr_times2, &one)
+///
+/// The function can be used with [Var], [Simd], and [M31Wrapper<Var>].
+pub fn double_x<T: CircuitOps + Clone>(context: &mut Context<impl IValue>, value: &T) -> T {
+    let value_sqr = eval!(context, (*value) * (*value));
+    eval!(context, ((value_sqr) + (value_sqr)) - (T::one(context, value)))
 }
 
 /// Computes `p + p`.
@@ -31,12 +25,9 @@ pub fn double_point(
     context: &mut Context<impl IValue>,
     p: &CirclePoint<M31Wrapper<Var>>,
 ) -> CirclePoint<M31Wrapper<Var>> {
-    let xy = eval!(context, (*p.x.get()) * (*p.y.get()));
+    let xy = eval!(context, (p.x) * (p.y));
     let new_y = eval!(context, (xy) + (xy));
-    CirclePoint {
-        x: M31Wrapper::new_unsafe(double_x(context, *p.x.get())),
-        y: M31Wrapper::new_unsafe(new_y),
-    }
+    CirclePoint { x: double_x(context, &p.x), y: new_y }
 }
 
 /// Same as [double_point], but for [Simd].
@@ -46,7 +37,7 @@ pub fn double_point_simd(
 ) -> CirclePoint<Simd> {
     let xy = Simd::mul(context, &p.x, &p.y);
     let new_y = Simd::add(context, &xy, &xy);
-    CirclePoint { x: double_x_simd(context, &p.x), y: new_y }
+    CirclePoint { x: double_x(context, &p.x), y: new_y }
 }
 
 /// Computes `2^n_doubles * p`.
@@ -129,7 +120,7 @@ pub fn coset_vanishing_poly(
     assert!(log_trace_size >= 1);
 
     for _ in 0..(log_trace_size - 1) {
-        x = double_x(context, x);
+        x = double_x(context, &x);
     }
     x
 }

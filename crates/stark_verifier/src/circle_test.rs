@@ -11,8 +11,7 @@ use stwo::core::fields::m31::M31;
 use stwo::core::fields::qm31::QM31;
 
 use crate::circle::{
-    add_points, add_points_simd, double_point, double_point_simd, double_x, double_x_simd,
-    sub_points_simd,
+    add_points, add_points_simd, double_point, double_point_simd, double_x, sub_points_simd,
 };
 
 #[test]
@@ -27,12 +26,12 @@ fn test_double_x() {
 
     // Regular version.
     let input = QM31::from(pt0.x).guess(&mut context);
-    let res = double_x(&mut context, input);
+    let res = double_x(&mut context, &input);
     assert_eq!(context.get(res), double_pt0.x.into());
 
     // Simd version.
     let input_simd = simd_from_u32s(&mut context, vec![pt0.x.0, pt1.x.0]);
-    let res_simd = double_x_simd(&mut context, &input_simd);
+    let res_simd = double_x(&mut context, &input_simd);
     assert_eq!(res_simd.len(), 2);
     assert_eq!(packed_values(&context, &res_simd)[0].0, CM31(double_pt0.x, double_pt1.x));
 

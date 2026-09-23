@@ -255,14 +255,14 @@ impl<Value: IValue> CairoStatement<Value> {
             context,
             &builtin_segment_ranges
                 .iter()
-                .map(|segment_range| segment_range.start.value.clone())
+                .map(|segment_range| segment_range.start.value)
                 .collect_vec(),
         );
         let end_addresses = Simd::pack(
             context,
             &builtin_segment_ranges
                 .iter()
-                .map(|segment_range| segment_range.end.value.clone())
+                .map(|segment_range| segment_range.end.value)
                 .collect_vec(),
         );
         let diff = Simd::sub(context, &end_addresses, &start_addresses);
@@ -369,7 +369,7 @@ fn output_limbs_from_hash<Value: IValue>(
         let cell: [M31Wrapper<Var>; MEMORY_VALUES_LIMBS] = array::from_fn(|i| {
             let start = i * LIMB_BITS;
             if start >= bits.len() {
-                return zero.clone();
+                return zero;
             }
 
             let chunk = &bits[start..(start + LIMB_BITS).min(bits.len())];

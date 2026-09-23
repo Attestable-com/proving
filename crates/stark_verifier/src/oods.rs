@@ -143,7 +143,7 @@ pub fn extract_expected_composition_eval(
     //  `x = pi^{max_log_degree_bound - 2}(oods_point.x) = pi(pi(...pi(oods_point.x)...))`.
     let mut x = oods_point.x;
     for _ in 0..max_log_degree_bound - 2 {
-        x = double_x(context, x);
+        x = double_x(context, &x);
     }
 
     eval!(context, (composition_eval_at_oods_left) + ((x) * (composition_eval_at_oods_right)))

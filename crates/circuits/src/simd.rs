@@ -255,7 +255,7 @@ impl Simd {
             res = Simd::select(context, bit, &res, &res_if_bit_is_one);
             // Square `pow2` to advance to the next power of two, except on the last iteration.
             if bit_idx < bits.len() - 1 {
-                pow2 = M31Wrapper::mul(context, pow2.clone(), pow2.clone());
+                pow2 = eval!(context, (pow2) * (pow2));
             }
         }
         res
@@ -305,6 +305,10 @@ impl CircuitOps for Simd {
 
     fn zero(context: &mut Context<impl IValue>, like: &Self) -> Self {
         Simd::zero(context, like.len())
+    }
+
+    fn one(context: &mut Context<impl IValue>, like: &Self) -> Self {
+        Simd::one(context, like.len())
     }
 }
 

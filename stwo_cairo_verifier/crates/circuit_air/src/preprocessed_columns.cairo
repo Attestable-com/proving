@@ -33,22 +33,22 @@ pub const BITWISE_XOR_9_0_IDX: PreprocessedColumnIdx = 10;
 pub const BITWISE_XOR_9_1_IDX: PreprocessedColumnIdx = 11;
 pub const BITWISE_XOR_9_2_IDX: PreprocessedColumnIdx = 12;
 
-pub const EQ_IN0_ADDRESS_IDX: PreprocessedColumnIdx = 13;
-pub const EQ_IN1_ADDRESS_IDX: PreprocessedColumnIdx = 14;
+pub const TRIPLE_XOR_INPUT_ADDR_0_IDX: PreprocessedColumnIdx = 13;
+pub const TRIPLE_XOR_INPUT_ADDR_1_IDX: PreprocessedColumnIdx = 14;
+pub const TRIPLE_XOR_INPUT_ADDR_2_IDX: PreprocessedColumnIdx = 15;
+pub const TRIPLE_XOR_OUTPUT_ADDR_IDX: PreprocessedColumnIdx = 16;
+pub const TRIPLE_XOR_MULTIPLICITY_IDX: PreprocessedColumnIdx = 17;
 
-pub const TRIPLE_XOR_INPUT_ADDR_0_IDX: PreprocessedColumnIdx = 15;
-pub const TRIPLE_XOR_INPUT_ADDR_1_IDX: PreprocessedColumnIdx = 16;
-pub const TRIPLE_XOR_INPUT_ADDR_2_IDX: PreprocessedColumnIdx = 17;
-pub const TRIPLE_XOR_OUTPUT_ADDR_IDX: PreprocessedColumnIdx = 18;
-pub const TRIPLE_XOR_MULTIPLICITY_IDX: PreprocessedColumnIdx = 19;
+pub const EQ_IN0_ADDRESS_IDX: PreprocessedColumnIdx = 18;
+pub const EQ_IN1_ADDRESS_IDX: PreprocessedColumnIdx = 19;
 
-pub const BITWISE_XOR_10_0_IDX: PreprocessedColumnIdx = 20;
-pub const BITWISE_XOR_10_1_IDX: PreprocessedColumnIdx = 21;
-pub const BITWISE_XOR_10_2_IDX: PreprocessedColumnIdx = 22;
+pub const M_31_TO_U_32_INPUT_ADDR_IDX: PreprocessedColumnIdx = 20;
+pub const M_31_TO_U_32_OUTPUT_ADDR_IDX: PreprocessedColumnIdx = 21;
+pub const M_31_TO_U_32_MULTIPLICITY_IDX: PreprocessedColumnIdx = 22;
 
-pub const M_31_TO_U_32_INPUT_ADDR_IDX: PreprocessedColumnIdx = 23;
-pub const M_31_TO_U_32_OUTPUT_ADDR_IDX: PreprocessedColumnIdx = 24;
-pub const M_31_TO_U_32_MULTIPLICITY_IDX: PreprocessedColumnIdx = 25;
+pub const BITWISE_XOR_10_0_IDX: PreprocessedColumnIdx = 23;
+pub const BITWISE_XOR_10_1_IDX: PreprocessedColumnIdx = 24;
+pub const BITWISE_XOR_10_2_IDX: PreprocessedColumnIdx = 25;
 
 // qm31_ops_* (log_size=23). Hand-ported components reference these without the
 // `qm31_ops_` prefix and with legacy names (`OP_0/OP_1/DST` for `in0/in1/out`).

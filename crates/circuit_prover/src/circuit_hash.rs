@@ -129,8 +129,8 @@ mod tests {
         let component_log_sizes = PerComponent {
             eq: 20,
             qm31_ops: 23,
-            triple_xor: 20,
-            m_31_to_u_32: 21,
+            triple_xor: 19,
+            m_31_to_u_32: 20,
             blake_g_gate: 23,
             verify_bitwise_xor_8: 16,
             verify_bitwise_xor_12: 20,
@@ -148,7 +148,7 @@ mod tests {
             .unwrap(),
         );
 
-        expect!["1e153175973f9466ee2f662e1f782c10a3d0b6bfa92d64c2b78c53fd35195ca"]
+        expect!["34adf23e8131cdb790fdb1412b8147f9c7d8904db61e9990f886c4d835ffdfc"]
             .assert_eq(&format!("{hash:x}"));
     }
 }

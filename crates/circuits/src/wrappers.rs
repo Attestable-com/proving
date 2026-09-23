@@ -7,6 +7,7 @@ use crate::context::{Context, GuessVar, Var};
 use crate::eval;
 use crate::ivalue::{IValue, NoValue, qm31_from_u32s};
 use crate::ops::{CircuitOps, Constant, Guess, add, guess_m31, mul, sub};
+use crate::simd::get_coord;
 
 #[cfg(test)]
 #[path = "wrappers_test.rs"]
@@ -202,6 +203,16 @@ impl U32Wrapper<Var> {
 
     pub fn get_value<Value: IValue>(self, context: &Context<Value>) -> U32Wrapper<Value> {
         U32Wrapper::new_unsafe(context.get(self.0))
+    }
+
+    /// Returns the low 16-bit limb of the `u32`.
+    pub fn low(&self, context: &mut Context<impl IValue>) -> M31Wrapper<Var> {
+        get_coord(context, &self.0, 0)
+    }
+
+    /// Returns the high 16-bit limb of the `u32`.
+    pub fn high(&self, context: &mut Context<impl IValue>) -> M31Wrapper<Var> {
+        get_coord(context, &self.0, 1)
     }
 }
 

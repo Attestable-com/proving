@@ -1,4 +1,3 @@
-use stwo::core::fields::m31::M31;
 use stwo::core::fields::qm31::QM31;
 use stwo::core::vcs::blake2_hash::Blake2sHash;
 use stwo_cairo_common::preprocessed_columns::blake::BLAKE_SIGMA;
@@ -8,9 +7,9 @@ use crate::context::{Context, Var};
 use crate::eval;
 use crate::ivalue::{IValue, NoValue, qm31_from_u32s};
 use crate::ops::{Constant, Guess, from_partial_evals};
-use crate::simd::Simd;
+use crate::simd::get_coord;
 use crate::utils::le_u32s_from_bytes;
-use crate::wrappers::U32Wrapper;
+use crate::wrappers::{M31Wrapper, U32Wrapper};
 
 #[cfg(test)]
 #[path = "blake_test.rs"]
@@ -219,9 +218,8 @@ pub fn unpack_qm31s_to_u32_words<Value: IValue>(
 ) -> Vec<U32Wrapper<Var>> {
     let mut words = Vec::new();
     for var in input {
-        let simd = Simd::from_packed(vec![var], 4);
         for coord in 0..4 {
-            let comp = Simd::unpack_idx(ctx, &simd, coord);
+            let comp = *get_coord(ctx, &var, coord).get();
             words.push(m31_to_u32(ctx, comp));
         }
     }
@@ -237,12 +235,11 @@ pub fn reduce_hash_value<Value: IValue>(
     ctx: &mut Context<Value>,
     hash: HashValue<Var>,
 ) -> ReducedHashValue<Var> {
-    let c_2_pow_16 = ctx.constant(M31::from(1u32 << 16).into());
+    let c_2_pow_16 = M31Wrapper::const_m31(ctx, (1u32 << 16).into());
     let reduced: [Var; BLAKE2S_DIGEST_N_WORDS] = std::array::from_fn(|i| {
-        let h_simd = Simd::from_packed(vec![*hash[i].get()], 2);
-        let low = Simd::unpack_idx(ctx, &h_simd, 0);
-        let high = Simd::unpack_idx(ctx, &h_simd, 1);
-        eval!(ctx, (low) + ((high) * (c_2_pow_16)))
+        let low = hash[i].low(ctx);
+        let high = hash[i].high(ctx);
+        *(eval!(ctx, (low) + ((high) * (c_2_pow_16))).get())
     });
 
     let out0 = from_partial_evals(ctx, [reduced[0], reduced[1], reduced[2], reduced[3]]);

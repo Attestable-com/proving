@@ -345,9 +345,8 @@ fn word_to_le_bits<Value: IValue>(
     context: &mut Context<Value>,
     word: &U32Wrapper<Var>,
 ) -> Vec<Simd> {
-    let packed = Simd::from_packed(vec![*word.get()], 2);
-    let low = Simd::from_packed(vec![Simd::unpack_idx(context, &packed, 0)], 1);
-    let high = Simd::from_packed(vec![Simd::unpack_idx(context, &packed, 1)], 1);
+    let low = Simd::from_packed(vec![*word.low(context).get()], 1);
+    let high = Simd::from_packed(vec![*word.high(context).get()], 1);
     chain!(extract_bits(context, &low, 16), extract_bits(context, &high, 16)).collect()
 }
 

@@ -204,20 +204,7 @@ impl Simd {
 
     /// Unpacks the `idx`-th [M31] value from the [Simd].
     pub fn unpack_idx(context: &mut Context<impl IValue>, input: &Simd, idx: usize) -> Var {
-        let qm31_var = input.data[idx / 4];
-        let coord = idx % 4;
-        // To obtain the `coord`-th coordinate, `c`, start with pointwise multiplication
-        // by a unit vector. This results in `c * unit_vecs[coord]`.
-        let unit_vec = context.constant(UNIT_VECS[coord]);
-        let x = pointwise_mul(context, qm31_var, unit_vec);
-        // Then, divide by `unit_vecs[coord]` to get `c`.
-        // For coord == 0, UNIT_VECS[0] = (1,0,0,0), so the pointwise multiplication already
-        // zeroed out the other coordinates and leaves c unchanged — no division needed.
-        if coord == 0 {
-            x
-        } else {
-            eval!(context, (x) * (context.constant(UNIT_VECS_INV[coord - 1])))
-        }
+        *get_coord(context, &input.data[idx / 4], idx % 4).get()
     }
 
     /// Packs a vector of [M31] values into [Simd].
@@ -321,5 +308,23 @@ fn first_ones(context: &mut Context<impl IValue>, n: usize) -> Var {
         2 => context.constant(qm31_from_u32s(1, 1, 0, 0)),
         3 => context.constant(qm31_from_u32s(1, 1, 1, 0)),
         _ => panic!("Unsupported number of ones: {n}"),
+    }
+}
+
+/// Returns the `coord`-th coordinate of the QM31 input.
+///
+/// The coordinates of `a + b * i + c * u + d * iu` are `[a, b, c, d]`.
+pub fn get_coord(context: &mut Context<impl IValue>, input: &Var, coord: usize) -> M31Wrapper<Var> {
+    // To obtain the `coord`-th coordinate, `c`, start with pointwise multiplication
+    // by a unit vector. This results in `c * unit_vecs[coord]`.
+    let unit_vec = context.constant(UNIT_VECS[coord]);
+    let x = pointwise_mul(context, *input, unit_vec);
+    // Then, divide by `unit_vecs[coord]` to get `c`.
+    // For coord == 0, UNIT_VECS[0] = (1,0,0,0), so the pointwise multiplication already
+    // zeroed out the other coordinates and leaves c unchanged - no division needed.
+    if coord == 0 {
+        M31Wrapper::new_unsafe(x)
+    } else {
+        M31Wrapper::new_unsafe(eval!(context, (x) * (context.constant(UNIT_VECS_INV[coord - 1]))))
     }
 }

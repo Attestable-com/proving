@@ -458,9 +458,9 @@ impl<Value: IValue> Statement<Value> for CairoStatement<Value> {
         // of four words. The padding mirrors the QM31-packed layout the channel expects (each QM31
         // holds four words; partial chunks pad with zeros), so the mixed words match what the proof
         // was generated with. Each returned list is mixed into the channel as one `mix_u32s` call.
-        let to_padded_u32_words = |ctx: &mut Context<Value>, vars: Vec<Var>| {
+        let to_padded_u32_words = |ctx: &mut Context<Value>, vars: &[M31Wrapper<Var>]| {
             let mut words: Vec<U32Wrapper<Var>> =
-                vars.into_iter().map(|v| m31_to_u32(ctx, v)).collect();
+                vars.iter().map(|v| m31_to_u32(ctx, *v)).collect();
             let pad = (4 - words.len() % 4) % 4;
             for _ in 0..pad {
                 words.push(U32Wrapper::const_u32(ctx, 0));
@@ -470,43 +470,45 @@ impl<Value: IValue> Statement<Value> for CairoStatement<Value> {
 
         // Mix the (hardcoded) enable bits into the channel for compatibility with the Cairo1
         // verifier: the count (in its own group), then one word per bit.
-        let enable_count = context.constant((enabled_bits.len() as u32).into());
-        let enable_count_words = to_padded_u32_words(context, vec![enable_count]);
-        let enable_bit_vars =
-            enabled_bits.iter().map(|&b| context.constant(u32::from(b).into())).collect_vec();
-        let enable_bits_words = to_padded_u32_words(context, enable_bit_vars);
+        let enable_count = M31Wrapper::const_m31(context, (enabled_bits.len() as u32).into());
+        let enable_count_words = to_padded_u32_words(context, &[enable_count]);
+        let enable_bit_vars = enabled_bits
+            .iter()
+            .map(|&b| M31Wrapper::const_m31(context, u32::from(b).into()))
+            .collect_vec();
+        let enable_bits_words = to_padded_u32_words(context, &enable_bit_vars);
 
         // Component log sizes, one word per size.
-        let log_size_vars = aux_data.component_log_sizes.iter().map(|v| *v.get()).collect_vec();
-        let log_sizes_words = to_padded_u32_words(context, log_size_vars);
+        let log_sizes_words = to_padded_u32_words(context, &aux_data.component_log_sizes);
 
         // Program length (in its own group), then the aux data fields in
         // `AuxData::parse_from_vars` order.
-        let program_len = context.constant((program.len() as u32).into());
-        let program_len_words = to_padded_u32_words(context, vec![program_len]);
+        let program_len = M31Wrapper::const_m31(context, (program.len() as u32).into());
+        let program_len_words = to_padded_u32_words(context, &[program_len]);
         let aux_data_vars = chain!(
             [
-                *aux_data.initial_state.pc.get(),
-                *aux_data.initial_state.ap.get(),
-                *aux_data.initial_state.fp.get(),
-                *aux_data.final_state.pc.get(),
-                *aux_data.final_state.ap.get(),
-                *aux_data.final_state.fp.get()
+                aux_data.initial_state.pc,
+                aux_data.initial_state.ap,
+                aux_data.initial_state.fp,
+                aux_data.final_state.pc,
+                aux_data.final_state.ap,
+                aux_data.final_state.fp
             ],
-            aux_data.segment_ranges.iter().flat_map(|r| {
-                [*r.start.id.get(), *r.start.value.get(), *r.end.id.get(), *r.end.value.get()]
-            }),
-            aux_data.safe_call_ids.iter().map(|id| *id.get()),
-            aux_data.output_ids.iter().map(|id| *id.get()),
-            aux_data.program_ids.iter().map(|id| *id.get()),
+            aux_data
+                .segment_ranges
+                .iter()
+                .flat_map(|r| { [r.start.id, r.start.value, r.end.id, r.end.value] }),
+            aux_data.safe_call_ids,
+            aux_data.output_ids.iter().copied(),
+            aux_data.program_ids.iter().copied(),
         )
         .collect_vec();
-        let aux_data_words = to_padded_u32_words(context, aux_data_vars);
+        let aux_data_words = to_padded_u32_words(context, &aux_data_vars);
 
         // Mix the outputs as 9-bit limbs into the channel.
-        let output_limb_vars = outputs.iter().flatten().map(|limb| *limb.get()).collect_vec();
+        let output_limb_vars = outputs.iter().flatten().cloned().collect_vec();
         let n_output_bytes = 4 * output_limb_vars.len();
-        let output_limb_words = to_padded_u32_words(context, output_limb_vars);
+        let output_limb_words = to_padded_u32_words(context, &output_limb_vars);
         let output_hash = blake2s_u32s(context, output_limb_words, n_output_bytes);
 
         // Compute the program hash at circuit construction time.

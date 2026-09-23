@@ -4,7 +4,7 @@ use circuits::context::{Context, FinalizedContext, Var};
 use circuits::eval;
 use circuits::ivalue::{IValue, qm31_from_u32s};
 use circuits::ops::{add_into, eq};
-use circuits::wrappers::U32Wrapper;
+use circuits::wrappers::{M31Wrapper, U32Wrapper};
 use rand_chacha::rand_core::{RngCore, SeedableRng};
 
 use crate::N_LANES;
@@ -40,7 +40,7 @@ fn pad_triple_xor(context: &mut Context<impl IValue>, target: usize) {
 fn pad_m31_to_u32(context: &mut Context<impl IValue>, target: usize) {
     let n_rows = context.circuit.m31_to_u32.len();
     assert!(n_rows <= target);
-    let zero = context.zero();
+    let zero = M31Wrapper::const_m31(context, 0.into());
     for _ in n_rows..target {
         circuits::blake::m31_to_u32(context, zero);
     }
@@ -125,11 +125,11 @@ fn random_u32_var(context: &mut Context<impl IValue>, rng: &mut impl RngCore) ->
 ///
 /// Note that we don't use the guess function here because we want to be able to run this after
 /// finalize_guessed_vars.
-fn random_m31_var(context: &mut Context<impl IValue>, rng: &mut impl RngCore) -> Var {
+fn random_m31_var(context: &mut Context<impl IValue>, rng: &mut impl RngCore) -> M31Wrapper<Var> {
     let zero = context.zero();
     let x = context.new_var(IValue::from_qm31(qm31_from_u32s(rng.next_u32(), 0, 0, 0)));
     add_into(context, x, zero, x);
-    x
+    M31Wrapper::new_unsafe(x)
 }
 
 /// Adds a random row to the triple_xor component, blinding its trace.

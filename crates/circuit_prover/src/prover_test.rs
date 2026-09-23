@@ -14,7 +14,7 @@ use circuits::eval;
 use circuits::ivalue::{IValue, NoValue, qm31_from_u32s};
 use circuits::ops::{Guess, guess, permute};
 use circuits::utils::le_u32s_from_bytes;
-use circuits::wrappers::U32Wrapper;
+use circuits::wrappers::{M31Wrapper, U32Wrapper};
 use expect_test::expect;
 use num_traits::{One, Zero};
 use stwo::core::channel::{Channel, MerkleChannel};
@@ -54,7 +54,7 @@ pub fn build_fibonacci_context() -> Context<QM31> {
         (809871181 + 0i) + (0 + 0i)u
     "]]
     .assert_debug_eq(&context.get(b));
-    let out = m31_to_u32(&mut context, b);
+    let out = m31_to_u32(&mut context, M31Wrapper::new_unsafe(b));
     set_digest_outputs(&mut context, &[out]);
 
     context
@@ -135,21 +135,23 @@ pub fn build_triple_xor_context() -> Context<QM31> {
 pub fn build_m31_to_u32_context() -> Context<QM31> {
     let mut context = Context::<QM31>::new(N_RESERVED);
 
-    let a = guess(&mut context, QM31::from(42));
+    // TODO(lior): Use `M31Wrapper::from_m31(42.into()).guess(&mut context)` instead of the next
+    //   line.
+    let a = M31Wrapper::new_unsafe(guess(&mut context, QM31::from(42)));
     let out_a = m31_to_u32(&mut context, a);
     expect![["
         U32((42 + 0i) + (0 + 0i)u)
     "]]
     .assert_debug_eq(&out_a.get_value(&context));
 
-    let b = guess(&mut context, QM31::from(100_000));
+    let b = M31Wrapper::new_unsafe(guess(&mut context, QM31::from(100_000)));
     let out_b = m31_to_u32(&mut context, b);
     expect![["
         U32((34464 + 1i) + (0 + 0i)u)
     "]]
     .assert_debug_eq(&out_b.get_value(&context));
 
-    let c = guess(&mut context, QM31::from(2_000_042));
+    let c = M31Wrapper::new_unsafe(guess(&mut context, QM31::from(2_000_042)));
     let out_c = m31_to_u32(&mut context, c);
     expect![["
         U32((33962 + 30i) + (0 + 0i)u)

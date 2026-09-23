@@ -219,7 +219,7 @@ pub fn unpack_qm31s_to_u32_words<Value: IValue>(
     let mut words = Vec::new();
     for var in input {
         for coord in 0..4 {
-            let comp = *get_coord(ctx, &var, coord).get();
+            let comp = get_coord(ctx, &var, coord);
             words.push(m31_to_u32(ctx, comp));
         }
     }
@@ -370,9 +370,12 @@ pub fn blake2s_g(a: u32, b: u32, c: u32, d: u32, f0: u32, f1: u32) -> (u32, u32,
 
 /// Adds an M31ToU32 gate to the circuit: convert an `M31` value into its `u32` representation, i.e
 /// `(x, 0, 0, 0)` into `(x & 0xFFFF, x >> 16, 0, 0)`.
-pub fn m31_to_u32<Value: IValue>(ctx: &mut Context<Value>, input: Var) -> U32Wrapper<Var> {
-    let out = ctx.new_var(ctx.get(input).m31_to_u32());
-    m31_to_u32_into(ctx, input, out);
+pub fn m31_to_u32<Value: IValue>(
+    ctx: &mut Context<Value>,
+    input: M31Wrapper<Var>,
+) -> U32Wrapper<Var> {
+    let out = ctx.new_var(ctx.get(*input.get()).m31_to_u32());
+    m31_to_u32_into(ctx, *input.get(), out);
     U32Wrapper::new_unsafe(out)
 }
 

@@ -135,23 +135,21 @@ pub fn build_triple_xor_context() -> Context<QM31> {
 pub fn build_m31_to_u32_context() -> Context<QM31> {
     let mut context = Context::<QM31>::new(N_RESERVED);
 
-    // TODO(lior): Use `M31Wrapper::from_m31(42.into()).guess(&mut context)` instead of the next
-    //   line.
-    let a = M31Wrapper::new_unsafe(guess(&mut context, QM31::from(42)));
+    let a = M31Wrapper::from_m31(42.into()).guess(&mut context);
     let out_a = m31_to_u32(&mut context, a);
     expect![["
         U32((42 + 0i) + (0 + 0i)u)
     "]]
     .assert_debug_eq(&out_a.get_value(&context));
 
-    let b = M31Wrapper::new_unsafe(guess(&mut context, QM31::from(100_000)));
+    let b = M31Wrapper::from_m31(100_000.into()).guess(&mut context);
     let out_b = m31_to_u32(&mut context, b);
     expect![["
         U32((34464 + 1i) + (0 + 0i)u)
     "]]
     .assert_debug_eq(&out_b.get_value(&context));
 
-    let c = M31Wrapper::new_unsafe(guess(&mut context, QM31::from(2_000_042)));
+    let c = M31Wrapper::from_m31(2_000_042.into()).guess(&mut context);
     let out_c = m31_to_u32(&mut context, c);
     expect![["
         U32((33962 + 30i) + (0 + 0i)u)
@@ -460,8 +458,8 @@ fn test_prove_and_circuit_verify_m31_to_u32_context() {
     .unwrap();
     let preprocessed_root = preprocessed_root_from_proof(&circuit_proof);
     expect![
-        "[600625078, 2147083019, 3436167066, 2746062012, 2124652205, 863849368, 4013760731, \
-         1715700551]"
+        "[777941867, 3859282686, 1287707509, 1563625489, 3325596128, 3095231039, 1694856643, \
+         153821658]"
     ]
     .assert_eq(&format!("{preprocessed_root:?}"));
     circuit_verify(circuit_proof, &preprocessed_circuit, preprocessed_root);

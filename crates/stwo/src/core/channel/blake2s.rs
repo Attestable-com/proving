@@ -12,7 +12,10 @@ pub const BLAKE_BYTES_PER_HASH: usize = 32;
 pub const FELTS_PER_HASH: usize = 8;
 
 pub type Blake2sChannel = Blake2sChannelGeneric<false>;
-/// Same as [Blake2sChannel], expect that the hash output is taken modulo M31::P.
+/// Blake2s with M31-reduced hash outputs and pair-sum field sampling.
+/// Each secure-field draw uses all eight reduced words from one hash. Its
+/// maximum point mass under a fresh uniform hash is `((2^33 + 6) / 2^64)^4`;
+/// this is bounded nonuniform sampling, not an exactly uniform field draw.
 pub type Blake2sM31Channel = Blake2sChannelGeneric<true>;
 
 /// A channel that can be used to draw random elements from a [Blake2sHash] digest.
@@ -32,7 +35,8 @@ impl<const IS_M31_OUTPUT: bool> Blake2sChannelGeneric<IS_M31_OUTPUT> {
         self.digest = new_digest;
         self.n_draws = 0;
     }
-    /// Generates a uniform random vector of BaseField elements.
+    /// Generates base-field limbs. The unreduced channel rejection-samples
+    /// uniform limbs; M31 hash outputs are already reduced and remain biased.
     fn draw_base_felts(&mut self) -> [BaseField; FELTS_PER_HASH] {
         // Repeats hashing with an increasing counter until getting a good result.
         // Retry probability for each round is ~ 2^(-28).
@@ -84,10 +88,17 @@ impl<const IS_M31_OUTPUT: bool> Channel for Blake2sChannelGeneric<IS_M31_OUTPUT>
 
     fn draw_secure_felt(&mut self) -> SecureField {
         let felts: [BaseField; FELTS_PER_HASH] = self.draw_base_felts();
-        SecureField::from_m31_array(felts[..SECURE_EXTENSION_DEGREE].try_into().unwrap())
+        if IS_M31_OUTPUT {
+            SecureField::from_m31_array(array::from_fn(|i| felts[i] + felts[i + 4]))
+        } else {
+            SecureField::from_m31_array(felts[..SECURE_EXTENSION_DEGREE].try_into().unwrap())
+        }
     }
 
     fn draw_secure_felts(&mut self, n_felts: usize) -> Vec<SecureField> {
+        if IS_M31_OUTPUT {
+            return (0..n_felts).map(|_| self.draw_secure_felt()).collect();
+        }
         let mut felts = iter::from_fn(|| Some(self.draw_base_felts())).flatten();
         let secure_felts = iter::from_fn(|| {
             Some(SecureField::from_m31_array([
@@ -146,7 +157,7 @@ mod tests {
     use std_shims::BTreeSet;
 
     use crate::core::channel::Channel;
-    use crate::core::channel::blake2s::Blake2sChannel;
+    use crate::core::channel::blake2s::{Blake2sChannel, Blake2sM31Channel};
     use crate::core::fields::qm31::SecureField;
     use crate::m31;
 
@@ -161,6 +172,39 @@ mod tests {
 
         channel.draw_secure_felts(9);
         assert_eq!(channel.n_draws, 6);
+    }
+
+    #[test]
+    fn m31_field_batches_match_single_draws_and_raw_words() {
+        let mut channel = Blake2sM31Channel::default();
+        let mut raw = channel.clone();
+        for count in [0, 1, 2, 3, 8, 9] {
+            let before = channel.n_draws;
+            let actual = channel.draw_secure_felts(count);
+            assert_eq!(channel.n_draws, before + count as u32);
+            let expected: Vec<_> = (0..count)
+                .map(|_| {
+                    let limbs = raw.draw_u32s();
+                    SecureField::from_m31_array(core::array::from_fn(|i| {
+                        super::BaseField::reduce(u64::from(limbs[i]))
+                            + super::BaseField::reduce(u64::from(limbs[i + 4]))
+                    }))
+                })
+                .collect();
+            assert_eq!(actual, expected);
+            assert_eq!(channel.draw_secure_felt(), {
+                let limbs = raw.draw_u32s();
+                SecureField::from_m31_array(core::array::from_fn(|i| {
+                    super::BaseField::reduce(u64::from(limbs[i]))
+                        + super::BaseField::reduce(u64::from(limbs[i + 4]))
+                }))
+            });
+            assert_eq!(channel.draw_u32s(), raw.draw_u32s());
+            channel.mix_u64(1234);
+            raw.mix_u64(1234);
+            assert_eq!(channel.n_draws, 0);
+            assert_eq!(channel.digest(), raw.digest());
+        }
     }
 
     #[test]

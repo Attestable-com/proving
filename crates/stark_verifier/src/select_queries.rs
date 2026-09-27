@@ -21,7 +21,7 @@ pub fn get_query_selection_input_from_channel(
 ) -> Simd {
     let mut v = Vec::new();
     for _ in 0..n_queries.div_ceil(EXTENSION_DEGREE * 2) {
-        v.extend_from_slice(&channel.draw_two_qm31s(context));
+        v.extend_from_slice(&channel.draw_raw_qm31s(context));
     }
     let n_qm31s = n_queries.div_ceil(EXTENSION_DEGREE);
     if n_qm31s % 2 == 1 {

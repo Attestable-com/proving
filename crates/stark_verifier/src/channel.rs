@@ -104,28 +104,22 @@ impl Channel {
         self.update_digest(reduce_hash_value(context, hash));
     }
 
-    /// Draws one `QM31` random value from the channel.
+    /// One semantic field draw: sum the two packed halves of a fresh hash.
+    /// Its maximum atom under a fresh uniform raw hash is
+    /// `((2^33 + 6) / 2^64)^4`, matching `Blake2sM31Channel`.
     pub fn draw_qm31(&mut self, context: &mut Context<impl IValue>) -> Var {
-        let [first, second] = self.draw_two_qm31s(context);
-        context.mark_as_unused(second);
-        first
+        let [first, second] = self.draw_raw_qm31s(context);
+        eval!(context, (first) + (second))
     }
 
-    /// Draws two `QM31` random values from the channel.
-    ///
-    /// The two returned QM31 values are negligibly close to uniform: the per-bit bias from
-    /// a perfectly uniform draw is at most 2^{-31}, which is negligible for Fiat-Shamir
-    /// security.
-    ///
-    /// Detailed breakdown: each QM31 consists of 4 M31 limbs, each a 32-bit Blake word
-    /// reduced mod M31 (p = 2^31 - 1). Since 2^32 = 2*M31 + 2, values 0 and 1 each have
-    /// 3 preimages in the u32 range (probability 3/2^32 each) while every v in
-    /// {2, ..., M31-1} has exactly 2 preimages (probability 2/2^32). Propagating this
-    /// through the bit representation of the M31 value, we have that P(k-th bit = 1) is
-    ///   = (2^31 - 1) / 2^32 if k = 0  (bias 2^{-32} from uniform)
-    ///   = (2^31 - 2) / 2^32 if k >= 1 (bias 2^{-31} from uniform)
-    /// (bits k >= 1 are slightly more biased because values 0 and 1 both have bit k = 0)
+    /// Two semantic field draws, consuming two distinct hash outputs.
     pub fn draw_two_qm31s(&mut self, context: &mut Context<impl IValue>) -> [Var; 2] {
+        [self.draw_qm31(context), self.draw_qm31(context)]
+    }
+
+    /// The eight reduced raw words, packed into two QM31 values.
+    /// This is the query-index path; these halves are not field challenges.
+    pub fn draw_raw_qm31s(&mut self, context: &mut Context<impl IValue>) -> [Var; 2] {
         let n_draws_var =
             context.constant(qm31_from_u32s(self.n_draws.try_into().unwrap(), 0, 0, 0));
         // Note that we add a zero byte for domain separation between generating randomness and

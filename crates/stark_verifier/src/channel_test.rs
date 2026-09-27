@@ -130,16 +130,16 @@ fn test_draw_qm31_regression() {
     let mut channel = Channel::from_digest(&mut context, init_digest);
 
     let res = channel.draw_qm31(&mut context);
-    assert_eq!(context.get(res), qm31_from_u32s(1511219767, 1680262446, 557532573, 1741612347));
+    assert_eq!(context.get(res), qm31_from_u32s(1154407666, 1440837157, 431313814, 1415041639));
 
     let res2 = channel.draw_qm31(&mut context);
-    assert_eq!(context.get(res2), qm31_from_u32s(1010544646, 1898030754, 53928552, 587440252));
+    assert_eq!(context.get(res2), qm31_from_u32s(1879003927, 786196770, 353505375, 1127163130));
 
     context.validate_circuit();
 }
 
 #[test]
-fn test_draw_two_qm31s_regression() {
+fn test_draw_raw_qm31s_regression() {
     let mut context = TraceContext::default();
 
     let init_digest = [
@@ -149,11 +149,11 @@ fn test_draw_two_qm31s_regression() {
 
     let mut channel = Channel::from_digest(&mut context, init_digest);
 
-    let res = channel.draw_two_qm31s(&mut context);
+    let res = channel.draw_raw_qm31s(&mut context);
     assert_eq!(context.get(res[0]), qm31_from_u32s(1511219767, 1680262446, 557532573, 1741612347));
     assert_eq!(context.get(res[1]), qm31_from_u32s(1790671546, 1908058358, 2021264888, 1820912939));
 
-    let res2 = channel.draw_two_qm31s(&mut context);
+    let res2 = channel.draw_raw_qm31s(&mut context);
     assert_eq!(context.get(res2[0]), qm31_from_u32s(1010544646, 1898030754, 53928552, 587440252));
     assert_eq!(context.get(res2[1]), qm31_from_u32s(868459281, 1035649663, 299576823, 539722878));
 
@@ -173,8 +173,16 @@ fn test_draw_point_regression() {
 
     let pt = channel.draw_point(&mut context);
 
-    assert_eq!(context.get(pt.x), qm31_from_u32s(1343313724, 1951183646, 1685075959, 888698585));
-    assert_eq!(context.get(pt.y), qm31_from_u32s(674655034, 1516640953, 569857337, 1549701521));
+    let mut native = Blake2sM31Channel::default();
+    let bytes: Vec<_> = init_digest
+        .into_iter()
+        .flat_map(|felt| felt.to_m31_array())
+        .flat_map(|limb| limb.0.to_le_bytes())
+        .collect();
+    native.update_digest(bytes.into());
+    let expected = stwo::core::circle::CirclePoint::get_random_point(&mut native);
+    assert_eq!(context.get(pt.x), expected.x);
+    assert_eq!(context.get(pt.y), expected.y);
 
     context.validate_circuit();
 }
@@ -278,5 +286,38 @@ fn test_unpack_then_mix_u32s_matches_mix_felts() {
     assert_eq!(context.get(channel.digest().0), expected2.0);
     assert_eq!(context.get(channel.digest().1), expected2.1);
 
+    context.validate_circuit();
+}
+
+#[test]
+fn mixed_field_and_query_draws_match_native() {
+    let mut context = TraceContext::default();
+    let mut channel = Channel::new(&mut context);
+    let mut native = Blake2sM31Channel::default();
+    for count in [0, 1, 2, 3, 8, 9] {
+        let expected = native.draw_secure_felts(count);
+        let actual: Vec<_> = (0..count)
+            .map(|_| {
+                let value = channel.draw_qm31(&mut context);
+                context.get(value)
+            })
+            .collect();
+        assert_eq!(actual, expected);
+        let pair = channel.draw_two_qm31s(&mut context);
+        let expected = native.draw_secure_felts(2);
+        assert_eq!(context.get(pair[0]), expected[0]);
+        assert_eq!(context.get(pair[1]), expected[1]);
+        let raw = channel.draw_raw_qm31s(&mut context);
+        let words: Vec<_> =
+            raw.into_iter().flat_map(|v| context.get(v).to_m31_array().map(|x| x.0)).collect();
+        assert_eq!(words, native.draw_u32s());
+        let value = context.new_var(qm31_from_u32s(count as u32, 2, 3, 4));
+        channel.mix_qm31s(&mut context, [value]);
+        native.mix_felts(&[context.get(value)]);
+        assert_eq!(channel.n_draws, 0);
+        let expected = ReducedHashValue::<QM31>::from(native.digest());
+        assert_eq!(context.get(channel.digest.0), expected.0);
+        assert_eq!(context.get(channel.digest.1), expected.1);
+    }
     context.validate_circuit();
 }

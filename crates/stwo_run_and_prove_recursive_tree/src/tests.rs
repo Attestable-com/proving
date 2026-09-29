@@ -138,9 +138,9 @@ fn circuit_registry() -> CircuitRegistry {
 }
 
 // ------------------------------------------------------------------------------------------------
-// Program-hash snapshots of the compiled-program fixtures in `test_data/`. A snapshot pins the
-// exact program a fixture holds; regenerating a fixture must reproduce the hash (or knowingly
-// change it here).
+// Program-hash snapshots of the compiled programs the tests run. A snapshot pins the exact
+// program a fixture holds; regenerating a fixture must reproduce the hash (or knowingly change it
+// here).
 //
 // Each fixture is built (with debug info) via its standard BUILD target in
 // https://github.com/starkware-industries/starkware (see the per-test comments), then stripped of
@@ -149,17 +149,13 @@ fn circuit_registry() -> CircuitRegistry {
 //   jq --indent 4 '.debug_info = null' "$(bazel info bazel-bin)/<artifact>.json" > <fixture>.json
 // ------------------------------------------------------------------------------------------------
 
-/// The Blake program-hash chain of a compiled-program fixture in `test_data/`, as the decimal
-/// string the snapshots pin.
-fn fixture_program_hash(file_name: &str) -> String {
+/// The Blake program-hash chain of a compiled program, as the decimal string the snapshots pin.
+fn program_hash(path: &std::path::Path) -> String {
     use cairo_program_runner_lib::compute_program_hash_chain;
     use cairo_program_runner_lib::types::HashFunc;
     use cairo_vm::types::program::Program;
 
-    let program_bytes = std::fs::read(
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data").join(file_name),
-    )
-    .expect("Failed to read the compiled fixture.");
+    let program_bytes = std::fs::read(path).expect("Failed to read the compiled fixture.");
     let program =
         Program::from_bytes(&program_bytes, Some("main")).expect("Failed to load the program.");
     let stripped_program = program.get_stripped_program().unwrap();
@@ -168,14 +164,18 @@ fn fixture_program_hash(file_name: &str) -> String {
         .to_string()
 }
 
-// Built at dev commit "c9180c2c9d9dd6df31fcdafcb86ede8a44402a73" from
+// The leaf simple bootloader the e2e folds run, shared with the privacy flow (which pins the same
+// hash): built from starkware#41232's
 // //src/starkware/cairo/bootloaders/simple_bootloader:leaf_simple_bootloader_program.
 #[test]
 fn test_leaf_simple_bootloader_program_hash_snapshot() {
     let expected = expect_test::expect![
-        "1295276242458012971975387023502514236353931151874237036512262876792126013758"
+        "182007537687310579697542984331198756973092309284201401073437552481857403195"
     ];
-    expected.assert_eq(&fixture_program_hash("leaf_simple_bootloader_compiled.json"));
+    expected.assert_eq(&program_hash(&std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
+        "../cairo-program-runner-lib/resources/compiled_programs/bootloaders/\
+         leaf_simple_bootloader_compiled.json",
+    )));
 }
 
 // Built at dev commit "c9180c2c9d9dd6df31fcdafcb86ede8a44402a73" from
@@ -185,7 +185,10 @@ fn test_simple_output_program_hash_snapshot() {
     let expected = expect_test::expect![
         "1433852663250257978909904594223798547176815246431631498282706690602142197827"
     ];
-    expected.assert_eq(&fixture_program_hash("simple_output_compiled.json"));
+    expected.assert_eq(&program_hash(
+        &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("test_data/simple_output_compiled.json"),
+    ));
 }
 
 // ------------------------------------------------------------------------------------------------

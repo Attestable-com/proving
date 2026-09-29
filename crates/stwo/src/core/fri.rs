@@ -406,7 +406,6 @@ pub struct ExtendedFriProof<H: MerkleHasherLifted> {
 }
 
 /// Number of folds for univariate polynomials.
-// TODO(andrew): Support different step sizes.
 pub const FOLD_STEP: u32 = 1;
 
 /// Proof of an individual FRI layer.
@@ -682,7 +681,7 @@ struct SparseEvaluation {
 impl SparseEvaluation {
     /// # Panics
     ///
-    /// Panics if a subset size doesn't equal `2^FOLD_STEP` or there aren't the same number of
+    /// Panics if a subset size doesn't equal `2^fold_step` or there aren't the same number of
     /// domain indexes as subsets.
     fn new(
         subset_evals: Vec<Vec<SecureField>>,

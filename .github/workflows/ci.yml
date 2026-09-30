@@ -169,6 +169,9 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Check verifiers compile on stable
         env:
+          # The repo's rust-toolchain.toml pins a nightly channel (see comment there), which
+          # would otherwise override the stable toolchain installed above. RUSTUP_TOOLCHAIN
+          # takes precedence over that file, so cargo actually runs on STABLE_VERSION here.
           RUSTUP_TOOLCHAIN: ${{ env.STABLE_VERSION }}
         run: cargo check ${{ needs.dispatcher.outputs.stable_crates }}
 

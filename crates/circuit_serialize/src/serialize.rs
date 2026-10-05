@@ -27,6 +27,7 @@ impl CircuitSerialize for Proof<QM31> {
             eval_domain_auth_paths,
             pow_nonce,
             interaction_pow_nonce,
+            batching_pow_nonce,
             fri,
         } = self;
 
@@ -43,6 +44,10 @@ impl CircuitSerialize for Proof<QM31> {
         eval_domain_auth_paths.serialize(output);
         pow_nonce.serialize(output);
         interaction_pow_nonce.serialize(output);
+        // Present exactly when the config has the grind; the deserializer reads it from there.
+        if let Some(nonce) = batching_pow_nonce {
+            nonce.serialize(output);
+        }
         fri.serialize(output);
     }
 }

@@ -27,13 +27,6 @@ pub fn proof_from_stark_proof(
     let sampled_values = &proof.proof.sampled_values;
     let fri_proof = &proof.proof.fri_proof;
 
-    let pow: u64 = proof.proof.proof_of_work;
-    let pow_high = (pow >> 32) as u32;
-    let pow_low = (pow & 0xFFFFFFFF) as u32;
-
-    let interaction_pow_high = (interaction_pow_nonce >> 32) as u32;
-    let interaction_pow_low = (interaction_pow_nonce & 0xFFFFFFFF) as u32;
-
     let all_fold_steps = compute_all_fold_steps(
         config.log_trace_size - config.fri.log_last_layer_degree_bound as usize,
         config.fri.fold_step as usize,
@@ -69,10 +62,19 @@ pub fn proof_from_stark_proof(
             auth_paths: construct_fri_auth_paths(proof, config, &all_fold_steps),
             witness: construct_fri_witness(proof, &all_fold_steps),
         },
-        pow_nonce: qm31_from_u32s(pow_low, pow_high, 0, 0),
-        interaction_pow_nonce: qm31_from_u32s(interaction_pow_low, interaction_pow_high, 0, 0),
+        pow_nonce: nonce_value(proof.proof.proof_of_work),
+        interaction_pow_nonce: nonce_value(interaction_pow_nonce),
+        // The caller sets the nonce of the grind before the batching coefficient, which a stark
+        // proof does not carry.
+        batching_pow_nonce: None,
         channel_salt: qm31_from_u32s(channel_salt, 0, 0, 0),
     }
+}
+
+/// A proof-of-work nonce as the circuit's `Channel::pow` reads it: the low and high words in the
+/// first two coordinates.
+pub fn nonce_value(nonce: u64) -> QM31 {
+    qm31_from_u32s((nonce & 0xFFFFFFFF) as u32, (nonce >> 32) as u32, 0, 0)
 }
 
 /// Converts a 2D vector of singletons to a 1D vector.

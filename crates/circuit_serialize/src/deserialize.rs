@@ -122,6 +122,10 @@ pub fn deserialize_proof_with_config(
     let eval_domain_auth_paths = deserialize_eval_domain_auth_paths(data, config)?;
     let pow_nonce = QM31::deserialize(data)?;
     let interaction_pow_nonce = QM31::deserialize(data)?;
+    let batching_pow_nonce = match config.n_batching_pow_bits {
+        Some(_) => Some(QM31::deserialize(data)?),
+        None => None,
+    };
     let fri = deserialize_fri_proof(data, config.log_trace_size, &config.fri)?;
 
     Ok(Proof {
@@ -138,6 +142,7 @@ pub fn deserialize_proof_with_config(
         eval_domain_auth_paths,
         pow_nonce,
         interaction_pow_nonce,
+        batching_pow_nonce,
         fri,
     })
 }

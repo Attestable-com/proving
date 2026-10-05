@@ -32,7 +32,7 @@ pub struct ProofInfo {
     pub n_queries: usize,
     pub n_columns_per_trace: [usize; N_TRACES],
     // Fixed scalars: channel_salt (QM31) + 3 roots (HashValue, 32 bytes each) + pow_nonce (QM31) +
-    // interaction_pow_nonce (QM31).
+    // interaction_pow_nonce (QM31) + batching_pow_nonce (QM31, when the config has the grind).
     pub fixed: usize,
     // Claim (serialized in packed format): enable bits + log sizes + claimed sums.
     pub claim: usize,
@@ -60,7 +60,9 @@ impl ProofInfo {
         let n_queries = config.fri.n_queries;
         let log_eval_domain = config.log_evaluation_domain_size();
 
-        let fixed = (1 + 3 * 2 + 1 + 1) * SECURE_EXTENSION_DEGREE * N_U8S_PER_U32;
+        let n_batching_nonces = usize::from(config.n_batching_pow_bits.is_some());
+        let fixed =
+            (1 + 3 * 2 + 1 + 1 + n_batching_nonces) * SECURE_EXTENSION_DEGREE * N_U8S_PER_U32;
 
         let claim = config.n_components() * SECURE_EXTENSION_DEGREE * N_U8S_PER_U32;
 
@@ -224,6 +226,11 @@ pub struct ProofConfig {
     // TODO(lior): Add a check on the total security bits of the protocol given parameters
     //   such as `fri.pow_bits`, `fri.n_queries`, etc.
     pub n_interaction_pow_bits: u32,
+    /// Bits of the proof of work between the sampled values and the batching coefficient of the
+    /// opened columns (`circuit_prover::batching_grind`), or `None` for a proof without it. Not
+    /// mixed into the channel: it is the verifier's own configuration, and a proof made under
+    /// other bits fails the check or diverges from the transcript.
+    pub n_batching_pow_bits: Option<u32>,
 
     // AIR structure.
     pub n_preprocessed_columns: usize,
@@ -296,6 +303,7 @@ impl ProofConfig {
 
         Self {
             n_interaction_pow_bits,
+            n_batching_pow_bits: None,
             n_preprocessed_columns,
             n_trace_columns,
             n_interaction_columns,
@@ -403,6 +411,8 @@ pub struct Proof<T> {
 
     pub pow_nonce: T,
     pub interaction_pow_nonce: T,
+    /// Present exactly when [`ProofConfig::n_batching_pow_bits`] is.
+    pub batching_pow_nonce: Option<T>,
     pub fri: FriProof<T>,
 }
 impl<T> Proof<T> {
@@ -422,10 +432,13 @@ impl<T> Proof<T> {
             eval_domain_auth_paths,
             pow_nonce: _,
             interaction_pow_nonce: _,
+            batching_pow_nonce,
             fri,
         } = self;
 
         assert_eq!(claimed_sums.len(), config.n_components());
+
+        assert_eq!(batching_pow_nonce.is_some(), config.n_batching_pow_bits.is_some());
 
         // Validate preprocessed_columns_at_oods.
         assert_eq!(preprocessed_columns_at_oods.len(), config.n_preprocessed_columns);
@@ -501,6 +514,7 @@ pub fn empty_proof(config: &ProofConfig) -> Proof<NoValue> {
         },
         pow_nonce: NoValue,
         interaction_pow_nonce: NoValue,
+        batching_pow_nonce: config.n_batching_pow_bits.map(|_| NoValue),
         fri: empty_fri_proof(config.log_trace_size, &config.fri),
         channel_salt: NoValue,
     }
@@ -523,6 +537,7 @@ impl<Value: IValue> Guess<Value> for Proof<Value> {
             eval_domain_auth_paths: self.eval_domain_auth_paths.guess(context),
             pow_nonce: self.pow_nonce.guess(context),
             interaction_pow_nonce: self.interaction_pow_nonce.guess(context),
+            batching_pow_nonce: self.batching_pow_nonce.map(|nonce| nonce.guess(context)),
             fri: self.fri.guess(context),
             channel_salt: self.channel_salt.guess(context),
         }

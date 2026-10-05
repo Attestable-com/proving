@@ -77,6 +77,10 @@ pub fn prepare_circuit_proof_for_cairo_verifier<H: MerkleHasherLifted>(
 where
     H::Hash: CairoSerialize + CairoDeserialize,
 {
+    assert!(
+        circuit_proof.batching_pow_nonce.is_none(),
+        "the Cairo verifier has no proof of work before the batching coefficient"
+    );
     let [trace_log_sizes, interaction_log_sizes] = column_log_sizes_per_tree(component_log_sizes);
     let stark_proof = CairoStarkProof::<H>::from_stark_proof(
         circuit_proof.stark_proof.proof,

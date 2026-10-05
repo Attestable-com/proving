@@ -45,6 +45,18 @@ pub fn build_verification_circuit<Value: IValue>(
     proof: Proof<Value>,
     public_data: CircuitPublicData,
 ) -> Result<FinalizedContext<Value>, String> {
+    build_verification_circuit_with_batching_pow(circuit_config, None, proof, public_data)
+}
+
+/// [`build_verification_circuit`] for proofs with a proof of work of `batching_pow_bits` before
+/// the batching coefficient (`ProofConfig::n_batching_pow_bits`); `None` is the protocol without
+/// it.
+pub fn build_verification_circuit_with_batching_pow<Value: IValue>(
+    circuit_config: CircuitConfig,
+    batching_pow_bits: Option<u32>,
+    proof: Proof<Value>,
+    public_data: CircuitPublicData,
+) -> Result<FinalizedContext<Value>, String> {
     let mut context = Context::new(N_RESERVED);
     let output_values = public_data
         .output_values
@@ -53,12 +65,13 @@ pub fn build_verification_circuit<Value: IValue>(
         .collect_vec();
     let statement = CircuitStatement::new(&mut context, &circuit_config, &output_values);
 
-    let proof_config = ProofConfig::new(
+    let mut proof_config = ProofConfig::new(
         statement.get_components(),
         circuit_config.preprocessed_column_log_sizes.len(),
         &circuit_config.config,
         INTERACTION_POW_BITS,
     );
+    proof_config.n_batching_pow_bits = batching_pow_bits;
     let proof_vars = proof.guess(&mut context);
 
     verify(&mut context, &proof_vars, &proof_config, &statement);
@@ -86,7 +99,23 @@ pub fn verify_circuit(
     proof: Proof<QM31>,
     public_data: CircuitPublicData,
 ) -> Result<FinalizedContext<QM31>, String> {
-    let context = build_verification_circuit(circuit_config, proof, public_data)?;
+    verify_circuit_with_batching_pow(circuit_config, None, proof, public_data)
+}
+
+/// [`verify_circuit`] for proofs with a proof of work of `batching_pow_bits` before the batching
+/// coefficient; `None` is the protocol without it.
+pub fn verify_circuit_with_batching_pow(
+    circuit_config: CircuitConfig,
+    batching_pow_bits: Option<u32>,
+    proof: Proof<QM31>,
+    public_data: CircuitPublicData,
+) -> Result<FinalizedContext<QM31>, String> {
+    let context = build_verification_circuit_with_batching_pow(
+        circuit_config,
+        batching_pow_bits,
+        proof,
+        public_data,
+    )?;
     #[cfg(test)]
     context.check_vars_used();
 

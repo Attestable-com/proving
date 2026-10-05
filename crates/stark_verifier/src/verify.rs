@@ -133,6 +133,14 @@ pub fn verify<Value: IValue>(
         ),
     );
 
+    // The proof of work before the batching coefficient, when the configuration has one: the
+    // nonce is checked against the digest that holds the sampled values, then mixed, so every
+    // fresh coefficient costs a fresh grind.
+    if let Some(n_bits) = config.n_batching_pow_bits {
+        let nonce = proof.batching_pow_nonce.expect("validated by `validate_structure`");
+        channel.pow(context, n_bits, nonce);
+    }
+
     // Compute the composition evaluation at the OODS point from `proof.*_at_oods` and compare
     // to `proof.composition_eval_at_oods`.
     let composition_eval = compute_composition_polynomial(

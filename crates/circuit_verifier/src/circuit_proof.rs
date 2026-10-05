@@ -10,6 +10,9 @@ pub struct CircuitProof<H: MerkleHasherLifted> {
     pub pcs_config: PcsConfig,
     pub claim: CircuitClaim,
     pub interaction_pow_nonce: u64,
+    /// The nonce of the proof of work between the sampled values and the batching coefficient,
+    /// when the proof was made with one (`circuit_prover::batching_grind`).
+    pub batching_pow_nonce: Option<u64>,
     pub interaction_claim: CircuitInteractionClaim,
     pub stark_proof: ExtendedStarkProof<H>,
     pub channel_salt: u32,

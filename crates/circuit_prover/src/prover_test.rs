@@ -6,7 +6,7 @@ use circuit_verifier::circuit_claim::{
 use circuit_verifier::statement::{
     INTERACTION_POW_BITS, all_circuit_components, circuit_component_log_sizes,
 };
-use circuit_verifier::verify::{CircuitConfig, verify_circuit};
+use circuit_verifier::verify::{CircuitConfig, verify_circuit, verify_circuit_with_batching_pow};
 use circuits::blake::{blake_g_gate, blake2s_m31, m31_to_u32, triple_xor};
 use circuits::context::{Context, Var};
 use circuits::eval;
@@ -21,12 +21,15 @@ use stwo::core::pcs::CommitmentSchemeVerifier;
 use stwo::core::vcs::blake2_hash::Blake2sHash;
 use stwo::core::vcs_lifted::blake2_merkle::{Blake2sM31MerkleChannel, Blake2sMerkleHasher};
 use stwo::core::vcs_lifted::poseidon252_merkle::Poseidon252MerkleChannel;
+use stwo::prover::backend::BackendForChannel;
 
+use crate::batching_grind::{BatchingGrindChannel, BatchingGrindMerkleChannel, Fired};
 use crate::circuit_air::circuit_components::CircuitComponents;
 use crate::circuit_hash::compute_circuit_hash;
 use crate::prover::{
     BaseColumnPool, CircuitProof, SimdBackend, prepare_circuit_proof_for_circuit_verifier,
-    prove_circuit_assignment, prove_circuit_assignment_with_channel,
+    prove_circuit_assignment, prove_circuit_assignment_with_batching_pow,
+    prove_circuit_assignment_with_channel,
 };
 use crate::test_utils::default_circuit_pcs_config;
 // Not a power of 2 so that we can test component padding.
@@ -181,18 +184,33 @@ pub fn build_blake_g_gate_context() -> Context<QM31> {
     context
 }
 
-/// Verifies a [`CircuitProof`] using the stwo verifier. Asserts that the proof is valid
-/// and that the logup sum is zero.
+/// Verifies a [`CircuitProof`] using the stwo verifier, the grind before the batching
+/// coefficient checked when `batching_pow_bits` is given. Panics on a proof the verifier
+/// refuses.
 fn stwo_verify<MC: MerkleChannel>(
     circuit_proof: CircuitProof<MC::H>,
     preprocessed_circuit: &PreprocessedCircuit,
-) {
+) where
+    SimdBackend: BackendForChannel<MC>,
+{
+    stwo_verify_with_batching_pow::<MC>(circuit_proof, preprocessed_circuit, None).unwrap();
+}
+
+fn stwo_verify_with_batching_pow<MC: MerkleChannel>(
+    circuit_proof: CircuitProof<MC::H>,
+    preprocessed_circuit: &PreprocessedCircuit,
+    batching_pow_bits: Option<u32>,
+) -> Result<(), String>
+where
+    SimdBackend: BackendForChannel<MC>,
+{
     let CircuitProof {
         claim,
         interaction_claim,
         pcs_config,
         stark_proof: proof,
         interaction_pow_nonce,
+        batching_pow_nonce,
         channel_salt,
         circuit_hash: _,
     } = circuit_proof;
@@ -204,10 +222,11 @@ fn stwo_verify<MC: MerkleChannel>(
     );
 
     let log_blowup_factor = pcs_config.fri_config.log_blowup_factor;
-    let verifier_channel = &mut MC::C::default();
+    let verifier_channel = &mut BatchingGrindChannel::<MC::C>::default();
     verifier_channel.mix_felts(&[channel_salt.into()]);
     pcs_config.mix_into(verifier_channel);
-    let commitment_scheme = &mut CommitmentSchemeVerifier::<MC>::new(pcs_config);
+    let commitment_scheme =
+        &mut CommitmentSchemeVerifier::<BatchingGrindMerkleChannel<MC>>::new(pcs_config);
 
     let [trace_log_sizes, interaction_log_sizes] = column_log_sizes_per_tree(&log_sizes);
 
@@ -219,11 +238,13 @@ fn stwo_verify<MC: MerkleChannel>(
     let preprocessed_root = proof.proof.commitments[0];
     let circuit_hash =
         compute_circuit_hash::<MC::H>(&log_sizes, log_blowup_factor, preprocessed_root);
-    MC::mix_hash(verifier_channel, circuit_hash);
+    BatchingGrindMerkleChannel::<MC>::mix_hash(verifier_channel, circuit_hash);
     claim.mix_into(verifier_channel);
     commitment_scheme.commit(proof.proof.commitments[1], &trace_log_sizes, verifier_channel);
 
-    verifier_channel.verify_pow_nonce(INTERACTION_POW_BITS, interaction_pow_nonce);
+    if !verifier_channel.verify_pow_nonce(INTERACTION_POW_BITS, interaction_pow_nonce) {
+        return Err("interaction proof of work".into());
+    }
 
     verifier_channel.mix_u64(interaction_pow_nonce);
     let interaction_elements = CircuitInteractionElements::draw(verifier_channel);
@@ -239,16 +260,27 @@ fn stwo_verify<MC: MerkleChannel>(
         &log_sizes,
         &preprocessed_circuit.preprocessed_trace.ids(),
     );
-    stwo::core::verifier::verify_ex(
+    match (batching_pow_bits, batching_pow_nonce) {
+        (Some(bits), Some(nonce)) => verifier_channel.arm(bits, Some(nonce)),
+        (None, None) => {}
+        _ => return Err("the batching nonce does not match the verifier's configuration".into()),
+    }
+    let verdict = stwo::core::verifier::verify_ex(
         &components.components(),
         verifier_channel,
         commitment_scheme,
         proof.proof,
         true,
-    )
-    .unwrap();
+    );
+    if batching_pow_bits.is_some() && verifier_channel.disarm()? != Fired::Checked {
+        return Err("the grind before the batching coefficient fails".into());
+    }
+    verdict.map_err(|e| e.to_string())?;
 
-    assert_eq!(lookup_sum(&claim, &interaction_claim, &interaction_elements,), QM31::zero());
+    if lookup_sum(&claim, &interaction_claim, &interaction_elements) != QM31::zero() {
+        return Err("logup sum".into());
+    }
+    Ok(())
 }
 
 #[test]
@@ -485,4 +517,143 @@ fn test_pad_context() {
     let qm31_ops = circuit.n_qm31_ops_rows();
     assert!(qm31_ops.is_power_of_two());
     context.validate_circuit();
+}
+
+/// Bits of the grind before the batching coefficient in the tests below.
+const BATCHING_POW_BITS: u32 = 10;
+
+fn fibonacci_proof(
+    batching_pow_bits: Option<u32>,
+) -> (CircuitProof<Blake2sMerkleHasher>, PreprocessedCircuit) {
+    let mut fibonacci_context = build_fibonacci_context().finalize(false);
+    fibonacci_context.validate_circuit();
+    let preprocessed_circuit = PreprocessedCircuit::preprocess_circuit(&mut fibonacci_context);
+    let values = fibonacci_context.values();
+    let pool = BaseColumnPool::<SimdBackend>::new();
+    let pcs_config = default_circuit_pcs_config(preprocessed_circuit.trace_log_size);
+    let proof = match batching_pow_bits {
+        Some(bits) => prove_circuit_assignment_with_batching_pow(
+            values,
+            &preprocessed_circuit,
+            &pool,
+            pcs_config,
+            bits,
+        ),
+        None => prove_circuit_assignment(values, &preprocessed_circuit, &pool, pcs_config),
+    }
+    .unwrap();
+    (proof, preprocessed_circuit)
+}
+
+/// The circuit verifier (with values, the native check) over a proof with the grind.
+fn circuit_verify_with_batching_pow(
+    circuit_proof: CircuitProof<Blake2sMerkleHasher>,
+    preprocessed_circuit: &PreprocessedCircuit,
+    batching_pow_bits: Option<u32>,
+    nonce: Option<Option<u64>>,
+) -> Result<(), String> {
+    let preprocessed_root = preprocessed_root_from_proof(&circuit_proof);
+    let circuit_config = CircuitConfig {
+        config: circuit_proof.pcs_config,
+        n_outputs: preprocessed_circuit.n_outputs,
+        preprocessed_column_log_sizes: preprocessed_circuit.preprocessed_trace.log_sizes(),
+        preprocessed_root: preprocessed_root.into(),
+    };
+    let (mut proof, public_data) = prepare_circuit_proof_for_circuit_verifier(circuit_proof);
+    if let Some(nonce) = nonce {
+        proof.batching_pow_nonce =
+            nonce.map(circuits_stark_verifier::proof_from_stark_proof::nonce_value);
+    }
+    verify_circuit_with_batching_pow(circuit_config, batching_pow_bits, proof, public_data)
+        .map(|_| ())
+}
+
+/// Another nonce than the prover's: it passes the check only with probability about
+/// `2^-BATCHING_POW_BITS`, and the fixture below is deterministic.
+fn other_nonce(proof: &CircuitProof<Blake2sMerkleHasher>) -> u64 {
+    proof.batching_pow_nonce.expect("a nonce") + 1
+}
+
+#[test]
+fn test_prove_and_verify_with_batching_pow() {
+    let (proof, preprocessed) = fibonacci_proof(Some(BATCHING_POW_BITS));
+    assert!(proof.batching_pow_nonce.is_some());
+    stwo_verify_with_batching_pow::<Blake2sM31MerkleChannel>(
+        proof,
+        &preprocessed,
+        Some(BATCHING_POW_BITS),
+    )
+    .unwrap();
+    let (proof, preprocessed) = fibonacci_proof(Some(BATCHING_POW_BITS));
+    circuit_verify_with_batching_pow(proof, &preprocessed, Some(BATCHING_POW_BITS), None).unwrap();
+    // The protocol without the grind is unchanged.
+    let (proof, preprocessed) = fibonacci_proof(None);
+    assert!(proof.batching_pow_nonce.is_none());
+    stwo_verify_with_batching_pow::<Blake2sM31MerkleChannel>(proof, &preprocessed, None).unwrap();
+    let (proof, preprocessed) = fibonacci_proof(None);
+    circuit_verify_with_batching_pow(proof, &preprocessed, None, None).unwrap();
+}
+
+#[test]
+fn test_wrong_batching_nonce_is_refused() {
+    let (mut proof, preprocessed) = fibonacci_proof(Some(BATCHING_POW_BITS));
+    let bad = other_nonce(&proof);
+    proof.batching_pow_nonce = Some(bad);
+    let verdict = stwo_verify_with_batching_pow::<Blake2sM31MerkleChannel>(
+        proof,
+        &preprocessed,
+        Some(BATCHING_POW_BITS),
+    );
+    assert_eq!(verdict, Err("the grind before the batching coefficient fails".into()));
+    let (proof, preprocessed) = fibonacci_proof(Some(BATCHING_POW_BITS));
+    assert!(
+        circuit_verify_with_batching_pow(
+            proof,
+            &preprocessed,
+            Some(BATCHING_POW_BITS),
+            Some(Some(bad)),
+        )
+        .is_err()
+    );
+    // A verifier demanding more bits than the prover ground refuses.
+    let (proof, preprocessed) = fibonacci_proof(Some(BATCHING_POW_BITS));
+    assert!(
+        stwo_verify_with_batching_pow::<Blake2sM31MerkleChannel>(proof, &preprocessed, Some(20))
+            .is_err()
+    );
+}
+
+#[test]
+fn test_missing_batching_grind_is_refused() {
+    // A proof made without the grind, given a nonce: the verifier mixes a nonce the prover never
+    // mixed, so the check fails or every later draw differs.
+    let (mut proof, preprocessed) = fibonacci_proof(None);
+    proof.batching_pow_nonce = Some(0);
+    assert!(
+        stwo_verify_with_batching_pow::<Blake2sM31MerkleChannel>(
+            proof,
+            &preprocessed,
+            Some(BATCHING_POW_BITS),
+        )
+        .is_err()
+    );
+    let (proof, preprocessed) = fibonacci_proof(None);
+    assert!(
+        circuit_verify_with_batching_pow(
+            proof,
+            &preprocessed,
+            Some(BATCHING_POW_BITS),
+            Some(Some(0)),
+        )
+        .is_err()
+    );
+    // A proof with the grind, its nonce dropped, under a verifier without the grind.
+    let (proof, preprocessed) = fibonacci_proof(Some(BATCHING_POW_BITS));
+    assert!(circuit_verify_with_batching_pow(proof, &preprocessed, None, Some(None)).is_err());
+    // Without its nonce the proof does not have the configured shape.
+    let (proof, preprocessed) = fibonacci_proof(Some(BATCHING_POW_BITS));
+    let missing = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        circuit_verify_with_batching_pow(proof, &preprocessed, Some(BATCHING_POW_BITS), Some(None))
+    }));
+    assert!(missing.is_err());
 }

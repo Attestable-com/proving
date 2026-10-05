@@ -5,12 +5,13 @@ pub use circuit_verifier::circuit_proof::CircuitProof;
 use circuit_verifier::statement::{INTERACTION_POW_BITS, all_circuit_components};
 use circuit_verifier::verify::CircuitPublicData;
 use circuits_stark_verifier::proof::{Proof, ProofConfig};
-use circuits_stark_verifier::proof_from_stark_proof::proof_from_stark_proof;
+use circuits_stark_verifier::proof_from_stark_proof::{nonce_value, proof_from_stark_proof};
 use num_traits::Zero;
 use stwo::core::channel::{Channel, MerkleChannel};
 use stwo::core::fields::qm31::QM31;
 use stwo::core::pcs::PcsConfig;
 use stwo::core::poly::circle::CanonicCoset;
+use stwo::core::proof::ExtendedStarkProof;
 use stwo::core::proof_of_work::GrindOps;
 use stwo::core::utils::MaybeOwned;
 use stwo::core::vcs_lifted::blake2_merkle::{Blake2sM31MerkleChannel, Blake2sMerkleHasher};
@@ -18,9 +19,12 @@ pub use stwo::prover::backend::simd::SimdBackend;
 pub use stwo::prover::mempool::BaseColumnPool;
 use stwo::prover::poly::circle::PolyOps;
 use stwo::prover::poly::twiddles::TwiddleTree;
-use stwo::prover::{CommitmentSchemeProver, CommitmentTreeProver, ProvingError, prove_ex};
+use stwo::prover::{
+    CommitmentSchemeProver, CommitmentTreeProver, ComponentProver, ProvingError, prove_ex,
+};
 use stwo_constraint_framework::PREPROCESSED_TRACE_IDX;
 
+use crate::batching_grind::{BatchingGrindMerkleChannel, Fired};
 use crate::circuit_air::circuit_components::CircuitComponents;
 use crate::circuit_hash::compute_circuit_hash;
 use crate::witness::trace::{TraceGenerator, write_interaction_trace, write_trace};
@@ -45,12 +49,59 @@ pub fn prove_circuit_assignment(
     )
 }
 
+/// [`prove_circuit_assignment`] with a proof of work of `batching_pow_bits` between the sampled
+/// values and the batching coefficient of the opened columns ([`crate::batching_grind`]); its
+/// nonce is [`CircuitProof::batching_pow_nonce`]. A verifier checks it with
+/// `ProofConfig::n_batching_pow_bits` set to the same bits.
+pub fn prove_circuit_assignment_with_batching_pow(
+    values: &[QM31],
+    preprocessed_circuit: &PreprocessedCircuit,
+    base_column_pool: &BaseColumnPool<SimdBackend>,
+    pcs_config: PcsConfig,
+    batching_pow_bits: u32,
+) -> Result<CircuitProof<Blake2sMerkleHasher>, ProvingError> {
+    let (twiddles, preprocessed_tree) = commit_preprocessed::<
+        BatchingGrindMerkleChannel<Blake2sM31MerkleChannel>,
+    >(preprocessed_circuit, base_column_pool, pcs_config);
+    prove_circuit_with_precompute_and_batching_pow::<Blake2sM31MerkleChannel>(
+        base_column_pool,
+        &twiddles,
+        preprocessed_circuit,
+        MaybeOwned::Owned(preprocessed_tree),
+        values,
+        pcs_config,
+        batching_pow_bits,
+    )
+}
+
 pub fn prove_circuit_assignment_with_channel<MC>(
     values: &[QM31],
     preprocessed_circuit: &PreprocessedCircuit,
     base_column_pool: &BaseColumnPool<SimdBackend>,
     pcs_config: PcsConfig,
 ) -> Result<CircuitProof<MC::H>, ProvingError>
+where
+    MC: MerkleChannel,
+    SimdBackend: stwo::prover::backend::BackendForChannel<MC>,
+{
+    let (twiddles, preprocessed_tree) =
+        commit_preprocessed::<MC>(preprocessed_circuit, base_column_pool, pcs_config);
+    prove_circuit_with_precompute::<MC>(
+        base_column_pool,
+        &twiddles,
+        preprocessed_circuit,
+        MaybeOwned::Owned(preprocessed_tree),
+        values,
+        pcs_config,
+    )
+}
+
+/// The twiddles and the committed preprocessed tree of `preprocessed_circuit`.
+fn commit_preprocessed<MC>(
+    preprocessed_circuit: &PreprocessedCircuit,
+    base_column_pool: &BaseColumnPool<SimdBackend>,
+    pcs_config: PcsConfig,
+) -> (TwiddleTree<SimdBackend>, CommitmentTreeProver<SimdBackend, MC>)
 where
     MC: MerkleChannel,
     SimdBackend: stwo::prover::backend::BackendForChannel<MC>,
@@ -82,15 +133,7 @@ where
         pcs_config.preprocessed_lifting_log_size,
         base_column_pool,
     );
-
-    prove_circuit_with_precompute::<MC>(
-        base_column_pool,
-        &twiddles,
-        preprocessed_circuit,
-        MaybeOwned::Owned(preprocessed_tree),
-        values,
-        pcs_config,
-    )
+    (twiddles, preprocessed_tree)
 }
 
 pub fn prove_circuit_with_precompute<'a, MC>(
@@ -100,6 +143,79 @@ pub fn prove_circuit_with_precompute<'a, MC>(
     preprocessed_tree: MaybeOwned<'a, CommitmentTreeProver<SimdBackend, MC>>,
     values: &[QM31],
     pcs_config: PcsConfig,
+) -> Result<CircuitProof<MC::H>, ProvingError>
+where
+    MC: MerkleChannel,
+    SimdBackend: stwo::prover::backend::BackendForChannel<MC>,
+{
+    prove_circuit_on_channel::<MC>(
+        base_column_pool,
+        twiddles,
+        preprocessed_circuit,
+        preprocessed_tree,
+        values,
+        pcs_config,
+        |components, channel, commitment_scheme| {
+            Ok((prove_ex::<SimdBackend, MC>(components, channel, commitment_scheme, true)?, None))
+        },
+    )
+}
+
+/// [`prove_circuit_with_precompute`] on `MC`'s channel wrapped in [`BatchingGrindChannel`], armed
+/// for a proof of work of `batching_pow_bits` before the batching coefficient.
+pub fn prove_circuit_with_precompute_and_batching_pow<'a, MC>(
+    base_column_pool: &BaseColumnPool<SimdBackend>,
+    twiddles: &TwiddleTree<SimdBackend>,
+    preprocessed_circuit: &PreprocessedCircuit,
+    preprocessed_tree: MaybeOwned<
+        'a,
+        CommitmentTreeProver<SimdBackend, BatchingGrindMerkleChannel<MC>>,
+    >,
+    values: &[QM31],
+    pcs_config: PcsConfig,
+    batching_pow_bits: u32,
+) -> Result<CircuitProof<MC::H>, ProvingError>
+where
+    MC: MerkleChannel,
+    SimdBackend: stwo::prover::backend::BackendForChannel<MC>,
+{
+    prove_circuit_on_channel::<BatchingGrindMerkleChannel<MC>>(
+        base_column_pool,
+        twiddles,
+        preprocessed_circuit,
+        preprocessed_tree,
+        values,
+        pcs_config,
+        |components, channel, commitment_scheme| {
+            channel.arm(batching_pow_bits, None);
+            let proof = prove_ex::<SimdBackend, BatchingGrindMerkleChannel<MC>>(
+                components,
+                channel,
+                commitment_scheme,
+                true,
+            )?;
+            match channel.disarm() {
+                Ok(Fired::Ground(nonce)) => Ok((proof, Some(nonce))),
+                outcome => panic!("the batching grind did not run as the prover's: {outcome:?}"),
+            }
+        },
+    )
+}
+
+/// The circuit prover on `MC`'s channel; `prove` runs the STARK prover on the components and
+/// returns the proof with the nonce of the grind before the batching coefficient, if any.
+fn prove_circuit_on_channel<'a, MC>(
+    base_column_pool: &BaseColumnPool<SimdBackend>,
+    twiddles: &TwiddleTree<SimdBackend>,
+    preprocessed_circuit: &PreprocessedCircuit,
+    preprocessed_tree: MaybeOwned<'a, CommitmentTreeProver<SimdBackend, MC>>,
+    values: &[QM31],
+    pcs_config: PcsConfig,
+    prove: impl FnOnce(
+        &[&dyn ComponentProver<SimdBackend>],
+        &mut MC::C,
+        CommitmentSchemeProver<'_, SimdBackend, MC>,
+    ) -> Result<(ExtendedStarkProof<MC::H>, Option<u64>), ProvingError>,
 ) -> Result<CircuitProof<MC::H>, ProvingError>
 where
     MC: MerkleChannel,
@@ -188,11 +304,12 @@ where
     let components = circuit_components.component_provers();
 
     // Prove stark.
-    let stark_proof = prove_ex::<SimdBackend, _>(&components, channel, commitment_scheme, true)?;
+    let (stark_proof, batching_pow_nonce) = prove(&components, channel, commitment_scheme)?;
     Ok(CircuitProof {
         pcs_config,
         claim,
         interaction_pow_nonce,
+        batching_pow_nonce,
         interaction_claim,
         stark_proof,
         channel_salt,
@@ -207,6 +324,7 @@ pub fn prepare_circuit_proof_for_circuit_verifier(
         pcs_config,
         claim,
         interaction_pow_nonce,
+        batching_pow_nonce,
         interaction_claim,
         stark_proof,
         channel_salt,
@@ -222,12 +340,15 @@ pub fn prepare_circuit_proof_for_circuit_verifier(
         INTERACTION_POW_BITS,
     );
 
-    let proof = proof_from_stark_proof(
+    let mut proof = proof_from_stark_proof(
         &stark_proof,
         &proof_config,
         interaction_claim.claimed_sums.into_array().to_vec(),
         interaction_pow_nonce,
         channel_salt,
     );
+    // The nonce of the grind before the batching coefficient, when the proof has one; the bits
+    // it is checked against are the verifier's own (`ProofConfig::n_batching_pow_bits`).
+    proof.batching_pow_nonce = batching_pow_nonce.map(nonce_value);
     (proof, public_data)
 }

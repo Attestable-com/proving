@@ -274,16 +274,16 @@ fn output_hash_from_output_cells(output: &[PubMemoryValue]) -> Result<Blake2sHas
     const BYTES_PER_WORD: usize = size_of::<u32>();
     const BYTES_PER_CELL: usize = N_WORDS_PER_OUTPUT_CELL * BYTES_PER_WORD;
     for (memory_cell_bytes, (_id, value)) in
-        zip_eq(output_hash_bytes.chunks_exact_mut(BYTES_PER_CELL), output.iter())
+        zip_eq(output_hash_bytes.as_chunks_mut::<BYTES_PER_CELL>().0, output.iter())
     {
         if value[N_WORDS_PER_OUTPUT_CELL..].iter().any(|word| *word != 0) {
             return Err("Each output cell must fit in 128 bits.".to_string());
         }
         for (dst, word) in zip_eq(
-            memory_cell_bytes.chunks_exact_mut(BYTES_PER_WORD),
+            memory_cell_bytes.as_chunks_mut::<BYTES_PER_WORD>().0,
             &value[..N_WORDS_PER_OUTPUT_CELL],
         ) {
-            dst.copy_from_slice(&word.to_le_bytes());
+            *dst = word.to_le_bytes();
         }
     }
     Ok(Blake2sHash(output_hash_bytes))
@@ -297,7 +297,7 @@ pub fn verify_cairo_with_component_set(
     let FlatClaim { component_enable_bits, component_log_sizes: _, public_data } =
         cairo_proof.claim.flatten_claim();
     let components: indexmap::IndexMap<&'static str, Box<dyn CircuitEval<QM31>>> =
-        zip_eq(all_components::<QM31>().into_iter(), &component_enable_bits)
+        zip_eq(all_components::<QM31>(), &component_enable_bits)
             .filter_map(|((component_name, component), &enable_bit)| {
                 let component_in_set = component_set.contains(component_name);
                 if component_in_set != enable_bit {

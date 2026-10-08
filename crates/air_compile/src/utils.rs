@@ -40,7 +40,7 @@ impl Display for CompiledAirVar {
             }
             CompiledAirVar::Tuple(exprs) => {
                 let strs = exprs.iter().map(ToString::to_string).collect::<Vec<_>>();
-                write!(f, "{}", &format!("({})", strs.join(", ")))
+                write!(f, "({})", strs.join(", "))
             }
             CompiledAirVar::Array(exprs) => {
                 write!(f, "{}", vars_arr_to_string(exprs))

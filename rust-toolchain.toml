@@ -2,6 +2,6 @@
 # they need nightly. The verifier crates don't use these features and are built on stable
 # in CI.
 [toolchain]
-channel = "nightly-2026-01-15"
+channel = "nightly-2026-07-06"
 profile = "default"
 components = ["rust-src", "rust-analyzer"]

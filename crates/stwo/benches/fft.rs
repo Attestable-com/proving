@@ -1,5 +1,3 @@
-#![feature(iter_array_chunks)]
-
 use std::hint::black_box;
 use std::mem::{size_of_val, transmute};
 

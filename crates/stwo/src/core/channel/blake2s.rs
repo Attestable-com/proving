@@ -114,8 +114,10 @@ impl<const IS_M31_OUTPUT: bool> Channel for Blake2sChannelGeneric<IS_M31_OUTPUT>
         self.n_draws += 1;
         Blake2sHasherGeneric::<IS_M31_OUTPUT>::hash(&hash_input)
             .0
-            .chunks_exact(4)
-            .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|chunk| u32::from_le_bytes(*chunk))
             .collect()
     }
 

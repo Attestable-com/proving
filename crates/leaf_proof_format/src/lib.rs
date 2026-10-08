@@ -19,8 +19,8 @@ pub struct DigestHex(pub [u32; N_DIGEST_WORDS]);
 impl From<[u8; 32]> for DigestHex {
     fn from(bytes: [u8; 32]) -> Self {
         let mut words = [0u32; N_DIGEST_WORDS];
-        for (word, src) in words.iter_mut().zip(bytes.chunks_exact(4)) {
-            *word = u32::from_le_bytes(src.try_into().unwrap());
+        for (word, src) in words.iter_mut().zip(bytes.as_chunks::<4>().0) {
+            *word = u32::from_le_bytes(*src);
         }
         DigestHex(words)
     }

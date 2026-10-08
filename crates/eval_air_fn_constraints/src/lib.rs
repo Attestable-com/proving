@@ -148,7 +148,7 @@ fn run_component_and_collect_steps(
     }
 
     let CompiledAirVar::Array(exprs) = &component.verifier_output.0 else {
-        panic!("Invalid output expression in {}", &component.name)
+        panic!("Invalid output expression in {}", component.name)
     };
     let output_values = exprs.iter().map(|e| scope.evaluate(e)).collect();
     (output_values, steps)

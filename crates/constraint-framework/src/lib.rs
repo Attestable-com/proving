@@ -1,4 +1,3 @@
-#![cfg_attr(feature = "prover", feature(portable_simd))]
 #![cfg_attr(not(feature = "std"), no_std)]
 // Some `unsafe fn` bodies here are unsafe by design; opt back into pre-2024
 // behavior instead of wrapping each op in an `unsafe {}` block.

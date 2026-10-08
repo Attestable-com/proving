@@ -50,7 +50,7 @@ impl AirFn for BitwiseBuiltin {
         let mut expected_xor = vec![];
         let mut expected_and = vec![];
         let mut expected_or = vec![];
-        for (i, (a, b)) in a.as_felts().into_iter().zip(b.as_felts().into_iter()).enumerate() {
+        for (i, (a, b)) in a.as_felts().into_iter().zip(b.as_felts()).enumerate() {
             let num_bits = if i == (FELT252_N_WORDS - 1) {
                 // The entries should each be 251 bits.
                 FELT252_BITS_PER_WORD - 1

@@ -137,7 +137,7 @@ fn blake2s_hash_u32s_matches_mix_u32s() {
     let mut channel = Blake2sChannelGeneric::<false>::default();
     // Advance the channel, so that the digest prefix is not the default one.
     channel.mix_u64(1);
-    let prefix: Vec<u32> = channel.digest().0.chunks_exact(4).map(le_word).collect();
+    let prefix: Vec<u32> = channel.digest().0.as_chunks::<4>().0.iter().map(le_word).collect();
     channel.mix_u32s(&WORDS);
 
     assert_eq!(
@@ -152,7 +152,7 @@ fn blake2s_hash_u32s_matches_mix_u32s() {
 fn blake2s_m31_hash_u32s_matches_mix_u32s() {
     let mut channel = Blake2sChannelGeneric::<true>::default();
     channel.mix_u64(1);
-    let prefix: Vec<u32> = channel.digest().0.chunks_exact(4).map(le_word).collect();
+    let prefix: Vec<u32> = channel.digest().0.as_chunks::<4>().0.iter().map(le_word).collect();
     channel.mix_u32s(&WORDS);
 
     assert_eq!(channel.digest(), Blake2sM31Hasher::hash_u32s(&[prefix, WORDS.to_vec()].concat()));
@@ -163,7 +163,7 @@ fn blake2s_m31_hash_u32s_matches_mix_u32s() {
 fn keccak256_hash_u32s_matches_mix_u32s() {
     let mut channel = Keccak256Channel::default();
     channel.mix_u64(1);
-    let prefix: Vec<u32> = channel.digest().0.chunks_exact(4).map(be_word).collect();
+    let prefix: Vec<u32> = channel.digest().0.as_chunks::<4>().0.iter().map(be_word).collect();
     channel.mix_u32s(&WORDS);
 
     assert_eq!(
@@ -193,10 +193,10 @@ fn poseidon252_hash_u32s_matches_mix_u32s() {
     );
 }
 
-fn le_word(bytes: &[u8]) -> u32 {
-    u32::from_le_bytes(bytes.try_into().unwrap())
+fn le_word(bytes: &[u8; 4]) -> u32 {
+    u32::from_le_bytes(*bytes)
 }
 
-fn be_word(bytes: &[u8]) -> u32 {
-    u32::from_be_bytes(bytes.try_into().unwrap())
+fn be_word(bytes: &[u8; 4]) -> u32 {
+    u32::from_be_bytes(*bytes)
 }

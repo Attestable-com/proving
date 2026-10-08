@@ -1,4 +1,4 @@
-#![feature(exact_size_is_empty, raw_slice_split, portable_simd)]
+#![feature(raw_slice_split)]
 // `unsafe fn` bodies here (e.g. `ComponentTrace::uninitialized`) are unsafe by
 // design; opt back into pre-2024 behavior instead of wrapping each op in an
 // `unsafe {}` block.

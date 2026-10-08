@@ -1,5 +1,3 @@
-#![feature(iter_array_chunks)]
-
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use itertools::Itertools;
 use stwo::core::fields::m31::BaseField;

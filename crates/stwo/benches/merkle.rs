@@ -1,5 +1,3 @@
-#![feature(iter_array_chunks)]
-
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use itertools::Itertools;
 use num_traits::Zero;

@@ -307,8 +307,6 @@ fn get_tree_structure_from_output_data(
 fn get_page_sizes_from_pages(output_size: usize, pages: &Pages) -> Result<Vec<usize>, PageError> {
     // Make sure the pages are adjacent to each other.
 
-    // The first page id is expected to be 1.
-    let mut expected_page_id: usize = 1;
     // We don't expect anything on its start value.
     let mut expected_page_start: usize = 0;
     // The size of page 0 is output_size if there are no other pages, or the start of page 1
@@ -324,6 +322,8 @@ fn get_page_sizes_from_pages(output_size: usize, pages: &Pages) -> Result<Vec<us
     };
 
     for (index, (page_id, page)) in sorted_pages_vec.iter().cloned().enumerate() {
+        // Page ids are expected to be consecutive, starting from 1.
+        let expected_page_id = index + 1;
         if *page_id != expected_page_id {
             return Err(PageError::UnexpectedPageId(expected_page_id, *page_id));
         }
@@ -339,7 +339,6 @@ fn get_page_sizes_from_pages(output_size: usize, pages: &Pages) -> Result<Vec<us
 
         page_sizes[index + 1] = page.size;
         expected_page_start = page.start + page.size;
-        expected_page_id += 1;
     }
 
     if !pages.is_empty() {

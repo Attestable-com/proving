@@ -151,7 +151,9 @@ fn build_balanced_tree(leaves: &[Node<QM31>]) -> (InputTree, Node<QM31>) {
         leaves.iter().cloned().map(|leaf| (BinaryTree::Leaf(leaf.clone()), leaf)).collect();
     while layer.len() > 1 {
         let mut next: Vec<(InputTree, Node<QM31>)> = layer
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|p| {
                 let circuit_hash = node_circuit_hash();
                 let subtree_hash = hash_node_ref(&p[0].1, &p[1].1);

@@ -252,8 +252,7 @@ fn fill_permutation_columns(
     columns: &mut Qm31OpsColumns,
     first_unused_address: usize,
 ) {
-    let mut permutation_address = first_unused_address;
-    for gate in gates.iter() {
+    for (permutation_address, gate) in (first_unused_address..).zip(gates) {
         let inputs = gate.uses();
         let outputs = gate.yields();
 
@@ -273,8 +272,6 @@ fn fill_permutation_columns(
             columns.qm31_ops_out_address.push(output);
             columns.qm31_ops_mults.push(multiplicities[output]);
         }
-
-        permutation_address += 1;
     }
 }
 
@@ -487,7 +484,9 @@ impl PreProcessedTrace {
     pub fn get_packed_column(&self, id: &PreProcessedColumnId) -> Vec<PackedM31> {
         let column = self.get_column(id);
         column
-            .chunks_exact(N_LANES)
+            .as_chunks::<N_LANES>()
+            .0
+            .iter()
             .map(|c| PackedM31::from_array(std::array::from_fn(|i| BaseField::from(c[i]))))
             .collect::<Vec<_>>()
     }

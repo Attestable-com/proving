@@ -89,8 +89,10 @@ pub fn verify_cairo(proof_output: &PrivacyProofOutput) -> Result<(), Box<dyn Err
     let (serialized_aux_data_bytes, serialized_proof_bytes) =
         proof_bytes.split_at((AUX_DATA_FIXED_LEN + program_len + n_components) * 4);
     let serialized_aux_data: Vec<M31> = serialized_aux_data_bytes
-        .chunks_exact(4)
-        .map(|c| M31::from(u32::from_le_bytes(c.try_into().unwrap())))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| M31::from(u32::from_le_bytes(*c)))
         .collect();
     let mut serialized_proof: &[u8] = serialized_proof_bytes;
     let proof =

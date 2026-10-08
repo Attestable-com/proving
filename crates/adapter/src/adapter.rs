@@ -83,7 +83,7 @@ mod tests {
         let expected_prover_input_path = get_prover_input_path(test_name);
         if is_fix_mode {
             let mut file = File::create(&expected_prover_input_path).unwrap();
-            write!(file, "{}", &to_string_pretty(&prover_input_value).unwrap()).unwrap();
+            write!(file, "{}", to_string_pretty(&prover_input_value).unwrap()).unwrap();
         }
         let expected_prover_input: serde_json::Value =
             serde_json::from_str(&read_to_string(&expected_prover_input_path).unwrap()).unwrap();

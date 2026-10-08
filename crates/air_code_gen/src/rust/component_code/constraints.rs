@@ -101,7 +101,7 @@ pub fn generate_inline_constraints_code(
     autogen_config: &AirAutogenConfig,
 ) -> rust::Tokens {
     let CompiledAirVar::Array(ref output_array) = air_fn.verifier_output.0 else {
-        panic!("Verifier output is not array in {}", &air_fn.name)
+        panic!("Verifier output is not array in {}", air_fn.name)
     };
     let name = air_fn.name.to_case(Case::Pascal);
     let input_name = format!("[{}]", air_fn.verifier_input_limbs.join(", "));

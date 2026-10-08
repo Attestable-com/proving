@@ -433,7 +433,7 @@ impl AirBody {
                                     vec![input]
                                         .into_iter()
                                         .chain(once(enabler))
-                                        .chain(state_vars.into_iter())
+                                        .chain(state_vars)
                                         .collect(),
                                 ),
                             },

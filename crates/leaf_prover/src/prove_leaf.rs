@@ -1,3 +1,4 @@
+use std::iter::zip;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -122,7 +123,7 @@ pub fn prove_leaf(
     // digest.
     let mut digest_words = [0u32; N_OUTPUTS * N_WORDS_PER_OUTPUT_CELL];
     for (chunk, cell) in
-        digest_words.chunks_exact_mut(N_WORDS_PER_OUTPUT_CELL).zip(program_output_u256s.iter())
+        zip(digest_words.as_chunks_mut::<N_WORDS_PER_OUTPUT_CELL>().0, &program_output_u256s)
     {
         chunk.copy_from_slice(&cell[..N_WORDS_PER_OUTPUT_CELL]);
     }

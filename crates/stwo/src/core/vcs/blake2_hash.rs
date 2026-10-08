@@ -45,8 +45,8 @@ impl From<Blake2sHash> for [u8; 32] {
 impl From<[u32; 8]> for Blake2sHash {
     fn from(val: [u32; 8]) -> Self {
         let mut bytes = [0u8; 32];
-        for (chunk, word) in bytes.chunks_exact_mut(4).zip(val) {
-            chunk.copy_from_slice(&word.to_le_bytes());
+        for (chunk, word) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(val) {
+            *chunk = word.to_le_bytes();
         }
         Self(bytes)
     }

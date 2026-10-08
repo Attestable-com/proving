@@ -1,7 +1,7 @@
 name: stwo-circuits CI
 
 env:
-  NIGHTLY_VERSION: "nightly-2026-01-15"
+  NIGHTLY_VERSION: "nightly-2026-07-06"
 
 on:
   workflow_call:

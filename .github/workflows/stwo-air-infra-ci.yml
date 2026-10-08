@@ -13,7 +13,7 @@ on:
 
 env:
   STABLE_VERSION: "1.94.0"
-  NIGHTLY_VERSION: "nightly-2026-01-15"
+  NIGHTLY_VERSION: "nightly-2026-07-06"
 
 jobs:
   js-typecheck:

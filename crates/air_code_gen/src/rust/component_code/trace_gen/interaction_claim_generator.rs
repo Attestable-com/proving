@@ -51,7 +51,7 @@ impl RustProverGen {
         let pairs = lookup_terms.iter().tuples();
 
         if lookup_terms.len() >= 2 {
-            code.extend(quote!($['\n']$("//")$(format!("Sum logup terms in pairs."))$("\n")));
+            code.extend(quote!($['\n']$("//")$("Sum logup terms in pairs.".to_string())$("\n")));
         }
         let mut offset = 0;
         for (term0, term1) in pairs {
@@ -129,7 +129,7 @@ impl RustProverGen {
                 quote! {, self.lookup_data.mults_$(*multiplicity_index)},
             );
             code.extend(quote! {
-                    $['\n']$("//")$(format!("Sum last logup term."))
+                    $['\n']$("//")$("Sum last logup term.".to_string())
                     let mut col_gen = logup_gen.new_col();
                     (
                         col_gen.par_iter_mut(),

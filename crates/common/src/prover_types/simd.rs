@@ -415,7 +415,7 @@ impl EqExtend for PackedM31 {
             value: self
                 .into_simd()
                 .simd_eq(other.into_simd())
-                .to_int()
+                .to_simd()
                 .bitand(Simd::splat(1))
                 .cast(),
         }

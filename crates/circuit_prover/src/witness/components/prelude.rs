@@ -38,14 +38,10 @@ pub use stwo_cairo_common::prover_types::cpu::{UInt16, UInt32};
 pub use stwo_cairo_common::prover_types::simd::{
     PackedBool, PackedM31Type, PackedUInt16, PackedUInt32, SIMD_ENUMERATION_0,
 };
-pub use stwo_cairo_prover::witness::fast_deduction::blake::{
-    G_STATE_INDICES, PackedBlakeRoundSigma, PackedTripleXor32,
-};
-pub use stwo_cairo_prover::witness::utils::{AtomicMultiplicityColumn, Enabler};
 pub use stwo_constraint_framework::preprocessed_columns::PreProcessedColumnId;
 pub use stwo_constraint_framework::{LogupTraceGenerator, Relation};
 
-pub use crate::witness::utils::pack_values;
+pub use crate::witness::utils::{AtomicMultiplicityColumn, Enabler, pack_values};
 
 const NUM_INPUT_WORDS_G: usize = 6;
 const NUM_OUTPUT_WORDS_G: usize = 4;
@@ -82,6 +78,43 @@ impl PackedBlakeG {
         b = (b >> 7) | (b << (u32::BITS - 7));
 
         [a, b, c, d]
+    }
+}
+
+pub const G_STATE_INDICES: [[usize; 4]; 8] = [
+    [0, 4, 8, 12],
+    [1, 5, 9, 13],
+    [2, 6, 10, 14],
+    [3, 7, 11, 15],
+    [0, 5, 10, 15],
+    [1, 6, 11, 12],
+    [2, 7, 8, 13],
+    [3, 4, 9, 14],
+];
+
+/// Local copy of stwo-cairo's `PackedTripleXor32`, so that this crate does not depend on
+/// stwo-cairo-prover.
+#[derive(Debug)]
+pub struct PackedTripleXor32 {}
+
+impl PackedTripleXor32 {
+    pub fn deduce_output([a, b, c]: [PackedUInt32; 3]) -> PackedUInt32 {
+        a ^ b ^ c
+    }
+}
+
+/// Local copy of stwo-cairo's `PackedBlakeRoundSigma`, so that this crate does not depend on
+/// stwo-cairo-prover.
+#[derive(Debug)]
+pub struct PackedBlakeRoundSigma {}
+
+impl PackedBlakeRoundSigma {
+    pub fn deduce_output(round: PackedM31) -> [PackedM31; N_BLAKE_SIGMA_COLS] {
+        Self::packed_sigma(round.into_simd()).map(|v| unsafe { PackedM31::from_simd_unchecked(v) })
+    }
+
+    pub fn packed_sigma(round: u32x16) -> [u32x16; N_BLAKE_SIGMA_COLS] {
+        from_fn(|i| u32x16::from(round.to_array().map(|x| BLAKE_SIGMA[x as usize][i])))
     }
 }
 

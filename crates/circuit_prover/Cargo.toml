@@ -17,7 +17,6 @@ stwo-air-utils-derive.workspace = true
 stwo-air-utils.workspace = true
 serde.workspace = true
 rayon.workspace = true
-stwo_cairo_prover.workspace = true
 stwo_cairo_common = { workspace = true, features = ["prover"] }
 circuits.workspace = true
 circuit-verifier.workspace = true

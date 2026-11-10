@@ -1,5 +1,17 @@
 name: CI
 
+# Runners: every job runs on a generic GitHub-hosted runner by default. To move a size class to
+# a bigger or self-hosted runner, set the matching repository variable to a runner label
+# (Settings -> Secrets and variables -> Actions -> Variables). No workflow change is needed.
+#   RUNNER_SMALL   lint, docs, light tests      (default: ubuntu-24.04)
+#   RUNNER_MEDIUM  Scarb jobs, binary builds    (default: ubuntu-24.04)
+#   RUNNER_LARGE   AVX tests, benchmarks        (default: ubuntu-24.04; avx512f tests need AVX-512)
+#   RUNNER_XLARGE  Cairo prover, circuits tests (default: ubuntu-24.04)
+#   RUNNER_HUGE    memory-heavy slow tests      (default: ubuntu-24.04; upstream uses 128 GB RAM)
+#   RUNNER_MACOS   NEON tests                   (default: macos-latest)
+# Heavy jobs call .github/actions/hosted-runner-prep to free disk space and to key the Rust cache
+# by CPU model.
+
 env:
   NIGHTLY_VERSION: "nightly-2026-07-06"
   STABLE_VERSION: "1.94.0"
@@ -20,7 +32,7 @@ concurrency:
 
 jobs:
   format:
-    runs-on: namespace-profile-starkware-libs-proving-dev-small-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_SMALL || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
@@ -32,7 +44,7 @@ jobs:
 
   clippy:
     name: clippy
-    runs-on: namespace-profile-starkware-libs-proving-dev-small-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_SMALL || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
@@ -46,7 +58,7 @@ jobs:
 
   docs:
     name: docs
-    runs-on: namespace-profile-starkware-libs-proving-dev-small-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_SMALL || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
@@ -59,7 +71,7 @@ jobs:
 
   typos:
     name: typos
-    runs-on: namespace-profile-starkware-libs-proving-dev-small-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_SMALL || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: taiki-e/install-action@3d7d7cd5ac7f994c1892ae0c06165095b9139094 # v2
@@ -69,7 +81,7 @@ jobs:
 
   shear:
     name: shear
-    runs-on: namespace-profile-starkware-libs-proving-dev-small-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_SMALL || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       # cargo-shear is a prebuilt binary, but it is invoked through `cargo` and runs
@@ -83,7 +95,7 @@ jobs:
       - run: cargo shear
 
   dispatcher:
-    runs-on: namespace-profile-starkware-libs-proving-dev-small-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_SMALL || 'ubuntu-24.04' }}
     outputs:
       # Booleans for whether to run or skip individual workflows.
       run_stwo: ${{ steps.dispatch.outputs.run_stwo }}
@@ -161,7 +173,7 @@ jobs:
   
   stable-crates:
     needs: dispatcher
-    runs-on: namespace-profile-starkware-libs-proving-dev-small-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_SMALL || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
@@ -177,7 +189,7 @@ jobs:
         run: cargo check ${{ needs.dispatcher.outputs.stable_crates }}
 
   cargo-lock:
-    runs-on: namespace-profile-starkware-libs-proving-dev-small-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_SMALL || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
@@ -206,7 +218,7 @@ jobs:
       - stwo-air-infra
       - cargo-lock
       - stable-crates
-    runs-on: namespace-profile-starkware-libs-proving-dev-small-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_SMALL || 'ubuntu-24.04' }}
     steps:
       - name: Verify no required job failed
         run: |

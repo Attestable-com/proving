@@ -6,7 +6,7 @@ on:
 
 jobs:
   scarb-fmt:
-    runs-on: namespace-profile-starkware-libs-proving-dev-medium-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_MEDIUM || 'ubuntu-24.04' }}
     defaults:
       run:
         working-directory: stwo_cairo_verifier
@@ -18,7 +18,7 @@ jobs:
       - run: scarb fmt --check
 
   scarb-lint:
-    runs-on: namespace-profile-starkware-libs-proving-dev-medium-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_MEDIUM || 'ubuntu-24.04' }}
     defaults:
       run:
         working-directory: stwo_cairo_verifier
@@ -30,7 +30,7 @@ jobs:
       - run: scarb lint --features=qm31_opcode --deny-warnings
 
   scarb-test:
-    runs-on: namespace-profile-starkware-libs-proving-dev-small-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_SMALL || 'ubuntu-24.04' }}
     defaults:
       run:
         working-directory: stwo_cairo_verifier
@@ -48,7 +48,7 @@ jobs:
       - run: scarb test --features=${{ matrix.feature }} -p ${{ matrix.package }}
 
   scarb-test-circuit:
-    runs-on: namespace-profile-starkware-libs-proving-dev-medium-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_MEDIUM || 'ubuntu-24.04' }}
     defaults:
       run:
         working-directory: stwo_cairo_verifier

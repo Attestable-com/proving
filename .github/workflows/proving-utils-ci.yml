@@ -17,7 +17,7 @@ on:
 
 jobs:
   tests:
-    runs-on: namespace-profile-starkware-libs-proving-dev-large-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_LARGE || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
@@ -46,13 +46,18 @@ jobs:
 
   slow-tests:
     # The applicative e2e test needs more memory than the xlarge profile has.
-    runs-on: namespace-profile-starkware-libs-proving-dev-32-128-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_HUGE || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - id: prep
+        uses: ./.github/actions/hosted-runner-prep
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: ${{ env.NIGHTLY_VERSION }}
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # Built with `-C target-cpu=native`: never reuse a cache from another CPU model.
+          key: ${{ steps.prep.outputs.cpu-key }}
       - name: Install latest nextest release
         uses: taiki-e/install-action@3d7d7cd5ac7f994c1892ae0c06165095b9139094 # v2
         with:
@@ -74,13 +79,18 @@ jobs:
 
   privacy-slow-tests:
     # The privacy large proofs test requires a lot of memory
-    runs-on: namespace-profile-starkware-libs-proving-dev-32-128-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_HUGE || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - id: prep
+        uses: ./.github/actions/hosted-runner-prep
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: ${{ env.NIGHTLY_VERSION }}
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # Built with `-C target-cpu=native`: never reuse a cache from another CPU model.
+          key: ${{ steps.prep.outputs.cpu-key }}
       - name: Install latest nextest release
         uses: taiki-e/install-action@3d7d7cd5ac7f994c1892ae0c06165095b9139094 # v2
         with:

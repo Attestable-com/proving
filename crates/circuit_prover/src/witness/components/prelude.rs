@@ -28,11 +28,10 @@ pub use stwo_air_utils_derive::{IterMut, ParIterMut, Uninitialized};
 pub use stwo_cairo_common::preprocessed_columns::preprocessed_trace::PreProcessedColumn;
 pub use stwo_cairo_common::prover_types::cpu::{UInt16, UInt32};
 pub use stwo_cairo_common::prover_types::simd::{PackedM31Type, PackedUInt16, PackedUInt32};
-pub use stwo_cairo_prover::witness::utils::AtomicMultiplicityColumn;
 pub use stwo_constraint_framework::preprocessed_columns::PreProcessedColumnId;
 pub use stwo_constraint_framework::{LogupTraceGenerator, Relation};
 
-pub use crate::witness::utils::pack_values;
+pub use crate::witness::utils::{AtomicMultiplicityColumn, pack_values};
 
 /// Create the input_to_row map used in const-size components.
 ///

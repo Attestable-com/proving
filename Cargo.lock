@@ -1709,7 +1709,6 @@ dependencies = [
  "stwo-air-utils",
  "stwo-air-utils-derive",
  "stwo-cairo-common",
- "stwo-cairo-prover",
  "stwo-constraint-framework",
 ]
 

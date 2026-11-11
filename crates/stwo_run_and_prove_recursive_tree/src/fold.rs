@@ -4,19 +4,18 @@
 use circuit_cairo_serialize::prepare_circuit_proof_for_cairo_verifier;
 use circuit_common::N_RESERVED;
 use circuit_common::finalize::pad_to_targets;
-use circuit_multiverifier::verify::{MultiverifierInput, build_multiverifier_circuit};
 use circuit_prover::prover::{
     prepare_circuit_proof_for_circuit_verifier, prove_circuit_assignment,
     prove_circuit_assignment_with_channel,
 };
 use circuit_serialize::deserialize::deserialize_proof_with_config;
-use circuit_serialize::serialize::CircuitSerialize;
 use circuit_verifier::circuit_proof::CircuitProof;
+use circuit_verifier::multiverifier::{CircuitVerifierInput, build_multiverifier_circuit};
 use circuit_verifier::statement::{all_circuit_components, circuit_component_log_sizes};
 use circuits::blake::HashValue;
 use circuits::ivalue::{IValue, NoValue};
-use circuits_stark_verifier::proof::ProofConfig;
-use leaf_proof_format::PackedNode;
+use circuits_stark_verifier::proof::{Proof, ProofConfig};
+use leaf_proof_format::{DigestHex, PackedNode};
 use stwo::core::fields::qm31::QM31;
 use stwo::core::vcs::blake2_hash::Blake2sHash;
 use stwo::core::vcs_lifted::blake2_merkle::Blake2sMerkleChannel;
@@ -26,111 +25,150 @@ use tracing::{Level, span};
 
 use crate::RecursiveTreeError;
 use crate::canonical::CanonicalCircuit;
-use crate::leaf_io::{LeafInput, LeafProofExt};
+use crate::leaf_io::LeafInput;
+
+/// A tree node's proof, in the form its consumer reads. Leaves, internal and carried nodes, and a
+/// [`ProofFormat::Circuit`] root hold the typed proof a circuit verifier checks. A
+/// [`ProofFormat::CairoVerifier`] root holds the serialized JSON of that format.
+pub enum NodeProof {
+    Circuit(Box<Proof<QM31>>),
+    CairoVerifierJson(String),
+}
+
+impl NodeProof {
+    /// The [`ProofFormat`] this proof is in.
+    pub fn format(&self) -> ProofFormat {
+        match self {
+            NodeProof::Circuit(_) => ProofFormat::Circuit,
+            NodeProof::CairoVerifierJson(_) => ProofFormat::CairoVerifier,
+        }
+    }
+}
 
 /// In-memory representation of a single tree node during reduction. At layer 0 these wrap the leaf
 /// proofs; at higher layers each entry is the result of folding two children.
 pub struct LayerEntry {
-    /// This node's serialized proof, held in memory (a leaf `Proof<QM31>` read from disk at layer
-    /// 0, a freshly reserialized multiverifier `Proof<QM31>` at internal/carried nodes, or the
-    /// Cairo verifier's felt252 arguments stream at the root — see [`reduce_pair`]). Kept in
-    /// memory rather than round-tripped through a scratch file — one proof per live entry, freed
-    /// as the layer is consumed.
-    pub proof_bytes: Vec<u8>,
+    /// This node's proof and public values.
+    pub proof_data: NodeProofData,
+    /// The packed subtree rooted at this node.
+    pub packed_node: PackedNode,
+}
+
+/// A tree node's proof and the public values a multiverifier checks it against.
+pub struct NodeProofData {
+    /// This node's proof.
+    pub proof: NodeProof,
     /// Preprocessed root of this node's proof: for a layer-0 leaf it's whatever root the manifest
     /// declared; for an internal/carried node it's the multiverifier root read from the freshly
     /// proved proof.
-    pub preprocessed_root: HashValue<QM31>,
-    /// This node's circuit output digest (the unreduced Blake2s digest the circuit outputs):
-    /// derived from the leaf's `output_preimage` at layer 0, read from the fresh proof's claim at
-    /// internal nodes. The multiverifier needs it to verify this node at the next layer.
-    pub output_digest: [u32; N_RESERVED],
-    /// Nested packed-output subtree rooted at this node.
-    pub packed_output: PackedNode,
+    pub preprocessed_root: DigestHex,
+    /// This node's circuit output digest, a public input to the multiverifier that verifies this
+    /// node.
+    pub output_digest: DigestHex,
 }
 
 impl LayerEntry {
-    /// Builds the layer-0 entry for a leaf from its [`LeafInput`]: the proof and preprocessed root
-    /// travel inline in the flattened [`leaf_proof_format::SerializedLeafProof`], and the output
-    /// digest is recomputed from the hashed-output preimage next to it.
-    pub fn from_leaf(leaf: &LeafInput) -> Result<Self, RecursiveTreeError> {
-        Ok(Self {
-            proof_bytes: leaf.proof.proof.clone(),
-            preprocessed_root: leaf.proof.preprocessed_root(),
-            output_digest: leaf.output_digest()?,
-            packed_output: PackedNode::leaf(
-                leaf.proof.circuit_hash.0,
-                leaf.output_preimage.clone(),
-            ),
-        })
-    }
-
-    /// Materializes this node as a [`MultiverifierInput`] by deserializing its in-memory proof.
-    pub fn to_multiverifier_input(
-        &self,
+    /// Builds the layer-0 entry for a leaf from its [`LeafInput`], deserializing the inline proof
+    /// with `proof_config`, the config the leaf was proven against. The preprocessed root travels
+    /// inline in the flattened [`leaf_proof_format::SerializedLeafProof`], and the output digest is
+    /// recomputed from the hashed-output preimage next to it.
+    pub fn from_leaf(
+        leaf: LeafInput,
         proof_config: &ProofConfig,
-    ) -> Result<MultiverifierInput<QM31>, RecursiveTreeError> {
-        let proof = deserialize_proof_with_config(&mut self.proof_bytes.as_slice(), proof_config)
+    ) -> Result<Self, RecursiveTreeError> {
+        let proof = deserialize_proof_with_config(&mut leaf.proof.proof.as_slice(), proof_config)
             .map_err(|e| RecursiveTreeError::Deserialize(format!("{e:?}")))?;
-        Ok(MultiverifierInput {
-            proof,
-            preprocessed_root: self.preprocessed_root.clone(),
-            output_digest: self.output_digest.into(),
+        Ok(Self {
+            proof_data: NodeProofData {
+                proof: NodeProof::Circuit(Box::new(proof)),
+                preprocessed_root: leaf.proof.circuit_preprocessed_root,
+                output_digest: leaf.output_digest()?,
+            },
+            // The preimage whose (blake or poseidon) digest is the leaf's output.
+            packed_node: PackedNode::leaf(leaf.proof.circuit_hash, leaf.output.preimage),
         })
     }
 }
 
+/// A fold proof's channel and wire format. Internal folds always use `Circuit`, since another
+/// multiverifier re-verifies them; the final reduction uses what the root's consumer expects.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+#[clap(rename_all = "snake_case")]
+pub enum ProofFormat {
+    /// For the Cairo circuit verifier program: the Blake2s Merkle channel, serialized as the
+    /// felt252 hex-string JSON stream `scarb execute --arguments-file` expects.
+    CairoVerifier,
+    /// For an enclosing circuit (the applicative unpacking verifier): proven like the internal
+    /// folds and written as the serialized `Proof<QM31>`, consumable as a `CircuitVerifierInput`.
+    Circuit,
+}
+
 /// Folds two children into a new parent entry: builds a multiverifier circuit that verifies both
-/// children, proves it against the canonical preprocessed circuit, and reserializes the resulting
-/// proof into the parent entry for the next layer.
+/// children, proves it against the canonical preprocessed circuit, and stores the resulting proof
+/// in the parent entry for the next layer.
 ///
-/// `is_root` marks the tree's final reduction. Its proof is consumed by the Cairo circuit verifier
-/// rather than by another multiverifier fold, so it is proven with the standard lossless Blake2s
-/// Merkle channel (internal folds use the M31 channel the multiverifier circuit verifies) and
-/// serialized as the felt252 hex-string JSON stream `scarb execute --arguments-file` expects.
-pub fn reduce_pair(
+/// `proof_format` is `Circuit` for an internal fold, and the tree's requested root format for the
+/// final reduction (see [`ProofFormat`]).
+pub(crate) fn reduce_pair(
     left: LayerEntry,
     right: LayerEntry,
     layer_idx: usize,
     pair_idx: usize,
     canonical: &CanonicalCircuit,
-    is_root: bool,
+    proof_format: ProofFormat,
 ) -> Result<LayerEntry, RecursiveTreeError> {
-    let input0 = left.to_multiverifier_input(&canonical.shared_config.proof_config)?;
-    let input1 = right.to_multiverifier_input(&canonical.shared_config.proof_config)?;
+    let input0 = build_circuit_verifier_input(left.proof_data);
+    let input1 = build_circuit_verifier_input(right.proof_data);
     reduce(
         input0,
         input1,
-        vec![left.packed_output, right.packed_output],
+        vec![left.packed_node, right.packed_node],
         layer_idx,
         pair_idx,
         canonical,
-        is_root,
+        proof_format,
     )
 }
 
 /// The single-leaf tree's root pass: folds the lone leaf with itself, so the root is an ordinary
 /// multiverifier proof.
-pub fn reduce_root_single(
+pub(crate) fn reduce_root_single(
     entry: LayerEntry,
     canonical: &CanonicalCircuit,
+    root_proof_format: ProofFormat,
 ) -> Result<LayerEntry, RecursiveTreeError> {
-    let input = entry.to_multiverifier_input(&canonical.shared_config.proof_config)?;
-    reduce(input.clone(), input, vec![entry.packed_output], 1, 0, canonical, true)
+    let input = build_circuit_verifier_input(entry.proof_data);
+    reduce(input.clone(), input, vec![entry.packed_node], 1, 0, canonical, root_proof_format)
+}
+
+/// Builds the [`CircuitVerifierInput`] the next fold verifies from a current layer's node.
+///
+/// Panics on a [`ProofFormat::CairoVerifier`] proof. Only the root is proven in that format, and
+/// the root never re-enters a fold.
+fn build_circuit_verifier_input(proof_data: NodeProofData) -> CircuitVerifierInput<QM31> {
+    let NodeProofData { proof, preprocessed_root, output_digest } = proof_data;
+    let NodeProof::Circuit(proof) = proof else {
+        panic!("a Cairo-verifier-format root proof never re-enters a fold");
+    };
+    CircuitVerifierInput {
+        proof: *proof,
+        preprocessed_root: HashValue::from(preprocessed_root.0),
+        output_digest: output_digest.0.into(),
+    }
 }
 
 /// Shared reduction body: proves a multiverifier over the two inputs and wraps the result in the
 /// parent entry, with `subtasks` as its packed children.
 fn reduce(
-    input0: MultiverifierInput<QM31>,
-    input1: MultiverifierInput<QM31>,
+    input0: CircuitVerifierInput<QM31>,
+    input1: CircuitVerifierInput<QM31>,
     subtasks: Vec<PackedNode>,
     layer_idx: usize,
     pair_idx: usize,
     canonical: &CanonicalCircuit,
-    is_root: bool,
+    proof_format: ProofFormat,
 ) -> Result<LayerEntry, RecursiveTreeError> {
-    let _span = span!(Level::INFO, "reduce", layer_idx, pair_idx, is_root).entered();
+    let _span = span!(Level::INFO, "reduce", layer_idx, pair_idx, ?proof_format).entered();
 
     let mut context =
         build_multiverifier_circuit::<QM31>(vec![input0, input1], &canonical.shared_config);
@@ -139,15 +177,19 @@ fn reduce(
         context.is_circuit_valid(),
         "multiverifier circuit rejected its inputs at layer {layer_idx} pair {pair_idx}"
     );
+    // In a release build the check above is compiled out, so a bad child first surfaces as a
+    // prover error; this is where the failing reduction gets named.
+    let proving_error =
+        |e| RecursiveTreeError::Proving { layer_idx, pair_idx, reason: format!("{e:?}") };
 
-    let (proof_bytes, extracted) = if is_root {
+    let (proof, extracted) = if proof_format == ProofFormat::CairoVerifier {
         let circuit_proof = prove_circuit_assignment_with_channel::<Blake2sMerkleChannel>(
             context.values(),
             &canonical.preprocessed_multiverifier,
             &canonical.base_column_pool,
             canonical.shared_config.pcs_config,
         )
-        .map_err(|e| RecursiveTreeError::Proving(format!("{e:?}")))?;
+        .map_err(proving_error)?;
         let extracted = extract_root_and_outputs(&circuit_proof)?;
 
         // Serialize for the Cairo circuit verifier: only the proof goes on the wire; the
@@ -158,8 +200,7 @@ fn reduce(
         );
         let felts = prepare_circuit_proof_for_cairo_verifier(circuit_proof, &component_log_sizes);
         let proof_hex: Vec<String> = felts.iter().map(|felt| format!("0x{felt:x}")).collect();
-        let proof_bytes = serde_json::to_vec_pretty(&proof_hex)?;
-        (proof_bytes, extracted)
+        (NodeProof::CairoVerifierJson(serde_json::to_string_pretty(&proof_hex)?), extracted)
     } else {
         let circuit_proof = prove_circuit_assignment(
             context.values(),
@@ -167,55 +208,50 @@ fn reduce(
             &canonical.base_column_pool,
             canonical.shared_config.pcs_config,
         )
-        .map_err(|e| RecursiveTreeError::Proving(format!("{e:?}")))?;
+        .map_err(proving_error)?;
         let extracted = extract_root_and_outputs(&circuit_proof)?;
 
         let (proof, _public_data) = prepare_circuit_proof_for_circuit_verifier(circuit_proof);
-        let mut proof_bytes = Vec::new();
-        proof.serialize(&mut proof_bytes);
-        (proof_bytes, extracted)
+        (NodeProof::Circuit(Box::new(proof)), extracted)
     };
 
     Ok(LayerEntry {
-        proof_bytes,
-        preprocessed_root: extracted.preprocessed_root,
-        output_digest: extracted.output_digest,
-        packed_output: PackedNode::Composite {
-            circuit_hash: extracted.circuit_hash_words,
-            subtasks,
+        proof_data: NodeProofData {
+            proof,
+            preprocessed_root: extracted.preprocessed_root,
+            output_digest: extracted.output_digest,
         },
+        packed_node: PackedNode::Composite { circuit_hash: extracted.circuit_hash, subtasks },
     })
 }
 
 /// The parent-entry data extracted from a freshly proven circuit proof: its preprocessed root (for
 /// the multiverifier input that re-verifies this node), the `circuit_hash` identifying the circuit
 /// (the unpacker's trust anchor, carried in `PackedNode`), and its circuit output digest.
-struct ExtractedProofData {
-    preprocessed_root: HashValue<QM31>,
-    circuit_hash_words: [u32; N_RESERVED],
-    output_digest: [u32; N_RESERVED],
+pub(crate) struct ExtractedProofData {
+    pub(crate) preprocessed_root: DigestHex,
+    pub(crate) circuit_hash: DigestHex,
+    pub(crate) output_digest: DigestHex,
 }
 
 /// Extracts the parent entry's preprocessed root and output digest from a freshly proven circuit
 /// proof. The claim's outputs are packed-`u32` `QM31`s; they are unpacked back to the raw digest
 /// words.
-fn extract_root_and_outputs<H: MerkleHasherLifted<Hash = Blake2sHash>>(
+pub(crate) fn extract_root_and_outputs<H: MerkleHasherLifted<Hash = Blake2sHash>>(
     circuit_proof: &CircuitProof<H>,
 ) -> Result<ExtractedProofData, RecursiveTreeError> {
     let root_hash = circuit_proof.stark_proof.proof.commitments[PREPROCESSED_TRACE_IDX];
-    let preprocessed_root: HashValue<QM31> = root_hash.into();
+    let preprocessed_root = DigestHex::from(root_hash.0);
     // The circuit's full identity, as the multiverifier mixes it and the unpacker recomputes it.
-    let circuit_hash_words = digest_bytes_to_words(&circuit_proof.circuit_hash.0);
+    let circuit_hash = DigestHex::from(circuit_proof.circuit_hash.0);
     let outputs: Vec<u32> =
         circuit_proof.claim.output_values.iter().map(|qm31| qm31.unpack_u32()).collect();
     let output_digest: [u32; N_RESERVED] = outputs.try_into().map_err(|v: Vec<u32>| {
         RecursiveTreeError::BadOutputArity { expected: N_RESERVED, got: v.len() }
     })?;
-    Ok(ExtractedProofData { preprocessed_root, circuit_hash_words, output_digest })
-}
-
-/// Reads a 32-byte digest as eight little-endian u32 words — the wire encoding of a preprocessed
-/// root everywhere outside the circuits (matching `HashValue`'s `From<Blake2sHash>`).
-pub fn digest_bytes_to_words(bytes: &[u8; 32]) -> [u32; N_RESERVED] {
-    std::array::from_fn(|i| u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap()))
+    Ok(ExtractedProofData {
+        preprocessed_root,
+        circuit_hash,
+        output_digest: DigestHex(output_digest),
+    })
 }

@@ -17,8 +17,12 @@ concurrency:
 jobs:
   # A re-publish overwrites the commit's artifacts, so its stale marker must come down before any
   # upload starts (and is rewritten only when all of them succeed).
+  #
+  # Publishes to StarkWare's GCS bucket, so it only runs in the upstream repo. Every other job
+  # needs this one, so on forks the whole workflow is skipped.
   clear-published-marker:
-    runs-on: namespace-profile-starkware-libs-proving-dev-small-ubuntu-24-04-amd64
+    if: github.repository == 'starkware-libs/proving'
+    runs-on: ${{ vars.RUNNER_SMALL || 'ubuntu-24.04' }}
     steps:
       - name: Authenticate with GCS
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
@@ -41,7 +45,7 @@ jobs:
   supported-circuits-registry-push:
     needs: clear-published-marker
     # Generating the largest production circuit needs more memory than the standard profiles have.
-    runs-on: namespace-profile-starkware-libs-proving-dev-32-128-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_HUGE || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
@@ -75,7 +79,7 @@ jobs:
 
   cairo-verifiers-push:
     needs: clear-published-marker
-    runs-on: namespace-profile-starkware-libs-proving-dev-medium-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_MEDIUM || 'ubuntu-24.04' }}
     strategy:
       fail-fast: false
       matrix:
@@ -111,7 +115,7 @@ jobs:
 
   generic-binaries-push:
     needs: clear-published-marker
-    runs-on: namespace-profile-starkware-libs-proving-dev-medium-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_MEDIUM || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
@@ -186,7 +190,7 @@ jobs:
   # single build.
   arch-binaries-push:
     needs: clear-published-marker
-    runs-on: namespace-profile-starkware-libs-proving-dev-medium-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_MEDIUM || 'ubuntu-24.04' }}
     strategy:
       # Publish every arch that does build; the marker job below reports the incomplete commit.
       fail-fast: false
@@ -231,7 +235,7 @@ jobs:
       - cairo-verifiers-push
       - generic-binaries-push
       - arch-binaries-push
-    runs-on: namespace-profile-starkware-libs-proving-dev-small-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_SMALL || 'ubuntu-24.04' }}
     steps:
       - name: Authenticate with GCS
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2

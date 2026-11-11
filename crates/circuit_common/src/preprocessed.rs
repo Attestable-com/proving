@@ -9,12 +9,14 @@ use circuits_stark_verifier::order_hash_map::OrderedHashMap;
 use itertools::{chain, zip_eq};
 #[cfg(feature = "prover")]
 use stwo::core::fields::m31::BaseField;
+use stwo::core::fri::{FriConfig, FriParams};
+use stwo::core::pcs::PcsConfig;
 #[cfg(feature = "prover")]
 use stwo::core::poly::circle::CanonicCoset;
 #[cfg(feature = "prover")]
 use stwo::core::vcs::blake2_hash::Blake2sHash;
 #[cfg(feature = "prover")]
-use stwo::core::vcs_lifted::blake2_merkle::Blake2sM31MerkleChannel;
+use stwo::core::vcs_lifted::blake2_merkle::Blake2sMerkleChannel;
 #[cfg(feature = "prover")]
 use stwo::prover::CommitmentTreeProver;
 #[cfg(feature = "prover")]
@@ -22,14 +24,14 @@ use stwo::prover::backend::simd::SimdBackend;
 #[cfg(feature = "prover")]
 use stwo::prover::backend::simd::m31::PackedM31;
 #[cfg(feature = "prover")]
-use stwo::prover::backend::{Backend, Col, Column};
+use stwo::prover::backend::{Backend, Col};
 #[cfg(feature = "prover")]
 use stwo::prover::mempool::BaseColumnPool;
 #[cfg(feature = "prover")]
 use stwo::prover::poly::BitReversedOrder;
 #[cfg(feature = "prover")]
 use stwo::prover::poly::circle::{CircleEvaluation, PolyOps};
-pub use stwo_cairo_common::preprocessed_columns::blake::BLAKE_SIGMA;
+use stwo_cairo_utils::math_utils::safe_log2;
 use stwo_constraint_framework::preprocessed_columns::PreProcessedColumnId;
 
 #[cfg(feature = "prover")]
@@ -41,8 +43,6 @@ use crate::finalize::{ComponentSizes, pad_context};
 #[cfg(test)]
 #[path = "preprocessed_test.rs"]
 pub mod test;
-
-const N_OP_CODES: usize = 4;
 
 /// Declares one padded AIR component's preprocessed columns, in commitment order: one column per
 /// field, under the field's name as the column id.
@@ -63,7 +63,9 @@ macro_rules! define_preprocessed_columns {
 
             /// Pushes every column under its id, in commitment order.
             fn push_to(self, pp_trace: &mut PreProcessedTrace) {
-                for (id, column) in zip_eq(Self::IDS.iter().copied(), [$(self.$field),+]) {
+                for (id, column) in
+                    zip_eq($struct_name::IDS.iter().copied(), [$(self.$field),+])
+                {
                     pp_trace.push_column(PreProcessedColumnId { id: id.to_owned() }, column);
                 }
             }
@@ -75,14 +77,14 @@ define_preprocessed_columns!(EqColumns, [eq_in0_address, eq_in1_address]);
 define_preprocessed_columns!(
     Qm31OpsColumns,
     [
-        qm31_ops_add_flag,
-        qm31_ops_sub_flag,
-        qm31_ops_mul_flag,
-        qm31_ops_pointwise_mul_flag,
-        qm31_ops_in0_address,
-        qm31_ops_in1_address,
-        qm31_ops_out_address,
-        qm31_ops_mults
+        qm_31_ops_add_flag,
+        qm_31_ops_sub_flag,
+        qm_31_ops_mul_flag,
+        qm_31_ops_pointwise_mul_flag,
+        qm_31_ops_in_0_address,
+        qm_31_ops_in_1_address,
+        qm_31_ops_out_address,
+        qm_31_ops_mults
     ]
 );
 define_preprocessed_columns!(
@@ -125,8 +127,7 @@ const SEQ_LOG_SIZE: u32 = 16;
 const N_XOR_TABLE_COLUMNS: usize = 3;
 
 /// The ids and log sizes of the fixed lookup-table columns, in commitment order: the sequence
-/// column, then the three columns of the bitwise-XOR table of each bit width. The sole source of
-/// those ids.
+/// column, then the three columns of the bitwise-XOR table of each bit width.
 fn fixed_column_layout() -> impl Iterator<Item = (String, u32)> {
     chain!(
         [(format!("seq_{SEQ_LOG_SIZE}"), SEQ_LOG_SIZE)],
@@ -186,6 +187,17 @@ pub fn layout_from_component_sizes(
     entries.into_iter().map(|(id, log_size)| (PreProcessedColumnId { id }, log_size)).collect()
 }
 
+/// The [`layout_from_component_sizes`] layout of circuits padded to `sizes`, and the PCS config
+/// they are proven with under `fri_params`: the one for that layout's largest column.
+pub fn layout_and_pcs_config(
+    sizes: &ComponentSizes,
+    fri_params: FriParams,
+) -> (OrderedHashMap<PreProcessedColumnId, u32>, PcsConfig) {
+    let layout = layout_from_component_sizes(sizes);
+    let trace_log_size = *layout.values().max().expect("the layout is non-empty");
+    (layout, PcsConfig::from_fri_config(FriConfig { params: fri_params, trace_log_size }))
+}
+
 #[derive(Copy, Clone, PartialEq)]
 enum OpCode {
     Add,
@@ -194,26 +206,13 @@ enum OpCode {
     PointwiseMul,
 }
 
-impl OpCode {
-    const ALL: [OpCode; N_OP_CODES] = [OpCode::Add, OpCode::Sub, OpCode::Mul, OpCode::PointwiseMul];
-}
-
 impl Qm31OpsColumns {
-    /// The one-hot flag column of `op_code`.
-    fn flag_column(&mut self, op_code: OpCode) -> &mut Vec<usize> {
-        match op_code {
-            OpCode::Add => &mut self.qm31_ops_add_flag,
-            OpCode::Sub => &mut self.qm31_ops_sub_flag,
-            OpCode::Mul => &mut self.qm31_ops_mul_flag,
-            OpCode::PointwiseMul => &mut self.qm31_ops_pointwise_mul_flag,
-        }
-    }
-
-    /// Appends `n_rows` rows of the one-hot op-code flags, set for `op_code` and clear elsewhere.
-    fn push_op_code_flags(&mut self, op_code: OpCode, n_rows: usize) {
-        for op in OpCode::ALL {
-            self.flag_column(op).extend(std::iter::repeat_n((op == op_code) as usize, n_rows));
-        }
+    /// Appends a row of the one-hot op-code flags, set for `op_code` and clear elsewhere.
+    fn push_op_code_flags(&mut self, op_code: OpCode) {
+        self.qm_31_ops_add_flag.push((op_code == OpCode::Add).into());
+        self.qm_31_ops_sub_flag.push((op_code == OpCode::Sub).into());
+        self.qm_31_ops_mul_flag.push((op_code == OpCode::Mul).into());
+        self.qm_31_ops_pointwise_mul_flag.push((op_code == OpCode::PointwiseMul).into());
     }
 }
 
@@ -227,12 +226,12 @@ fn fill_binary_op_columns<G: Gate>(
     for gate in gates.iter() {
         let [in0, in1] = gate.uses()[..] else { panic!("Expected 2 uses for gate") };
         let [out] = gate.yields()[..] else { panic!("Expected 1 yield for gate") };
-        columns.push_op_code_flags(op_code, 1);
-        columns.qm31_ops_in0_address.push(in0);
-        columns.qm31_ops_in1_address.push(in1);
-        columns.qm31_ops_out_address.push(out);
+        columns.push_op_code_flags(op_code);
+        columns.qm_31_ops_in_0_address.push(in0);
+        columns.qm_31_ops_in_1_address.push(in1);
+        columns.qm_31_ops_out_address.push(out);
         // TODO(Gali): Consider negating the multiplicities.
-        columns.qm31_ops_mults.push(multiplicities[out]);
+        columns.qm_31_ops_mults.push(multiplicities[out]);
     }
 }
 
@@ -252,29 +251,26 @@ fn fill_permutation_columns(
     columns: &mut Qm31OpsColumns,
     first_unused_address: usize,
 ) {
-    let mut permutation_address = first_unused_address;
-    for gate in gates.iter() {
+    for (permutation_address, gate) in (first_unused_address..).zip(gates) {
         let inputs = gate.uses();
         let outputs = gate.yields();
 
-        columns.push_op_code_flags(OpCode::Add, inputs.len() + outputs.len());
-
-        // TODO(alonf): Parallelize, and insert the above loop inside.
+        // TODO(alonf): Parallelize.
         for (input, output) in zip_eq(inputs, outputs) {
             // Input row.
-            columns.qm31_ops_in0_address.push(0);
-            columns.qm31_ops_in1_address.push(input);
-            columns.qm31_ops_out_address.push(permutation_address);
-            columns.qm31_ops_mults.push(1);
+            columns.push_op_code_flags(OpCode::Add);
+            columns.qm_31_ops_in_0_address.push(0);
+            columns.qm_31_ops_in_1_address.push(input);
+            columns.qm_31_ops_out_address.push(permutation_address);
+            columns.qm_31_ops_mults.push(1);
 
             // Output row.
-            columns.qm31_ops_in0_address.push(0);
-            columns.qm31_ops_in1_address.push(permutation_address);
-            columns.qm31_ops_out_address.push(output);
-            columns.qm31_ops_mults.push(multiplicities[output]);
+            columns.push_op_code_flags(OpCode::Add);
+            columns.qm_31_ops_in_0_address.push(0);
+            columns.qm_31_ops_in_1_address.push(permutation_address);
+            columns.qm_31_ops_out_address.push(output);
+            columns.qm_31_ops_mults.push(multiplicities[output]);
         }
-
-        permutation_address += 1;
     }
 }
 
@@ -307,7 +303,7 @@ fn add_qm31_ops_to_preprocessed_trace(
     fill_binary_op_columns(pointwise_mul, OpCode::PointwiseMul, multiplicities, &mut columns);
     // Every column is as long as the binary-op rows written so far; the flags are one such column.
     let qm31_ops_trace_generator =
-        Qm31OpsTraceGenerator { first_permutation_row: columns.qm31_ops_add_flag.len() };
+        Qm31OpsTraceGenerator { first_permutation_row: columns.qm_31_ops_add_flag.len() };
 
     fill_permutation_columns(permutation, multiplicities, &mut columns, n_vars);
 
@@ -420,6 +416,13 @@ pub struct PreProcessedTrace {
     columns: OrderedHashMap<PreProcessedColumnId, Vec<usize>>,
 }
 
+/// Log2 of a preprocessed column's length. Panics if the length is not a power of two.
+fn column_log_size(id: &PreProcessedColumnId, column: &[usize]) -> u32 {
+    safe_log2(column.len() as u128).unwrap_or_else(|| {
+        panic!("Preprocessed column {id:?} has a non-power-of-two length {}", column.len())
+    })
+}
+
 impl PreProcessedTrace {
     fn push_column(&mut self, id: PreProcessedColumnId, column: Vec<usize>) {
         assert!(
@@ -449,16 +452,12 @@ impl PreProcessedTrace {
     }
 
     pub fn log_sizes(&self) -> OrderedHashMap<PreProcessedColumnId, u32> {
-        self.columns.iter().map(|(id, column)| (id.clone(), column.len().ilog2())).collect()
+        self.columns.iter().map(|(id, column)| (id.clone(), column_log_size(id, column))).collect()
     }
 
     /// Log2 of the trace size: the largest column's log size.
     pub fn trace_log_size(&self) -> u32 {
-        self.columns
-            .values()
-            .map(|column| column.len().ilog2())
-            .max()
-            .expect("the preprocessed trace is non-empty")
+        *self.log_sizes().values().max().expect("the preprocessed trace is non-empty")
     }
 
     pub fn ids(&self) -> Vec<PreProcessedColumnId> {
@@ -471,12 +470,12 @@ impl PreProcessedTrace {
 
     #[cfg(feature = "prover")]
     pub fn get_trace<B: Backend>(&self) -> Vec<CircleEvaluation<B, BaseField, BitReversedOrder>> {
-        let to_evaluation = |vec: &[usize]| {
+        let to_evaluation = |id: &PreProcessedColumnId, vec: &[usize]| {
             let col = Col::<B, BaseField>::from_iter(vec.iter().cloned().map(BaseField::from));
-            CircleEvaluation::new(CanonicCoset::new(col.len().ilog2()).circle_domain(), col)
+            CircleEvaluation::new(CanonicCoset::new(column_log_size(id, vec)).circle_domain(), col)
         };
 
-        self.columns.values().map(|c| to_evaluation(c)).collect()
+        self.columns.iter().map(|(id, c)| to_evaluation(id, c)).collect()
     }
 
     pub fn get_column(&self, id: &PreProcessedColumnId) -> &Vec<usize> {
@@ -487,7 +486,9 @@ impl PreProcessedTrace {
     pub fn get_packed_column(&self, id: &PreProcessedColumnId) -> Vec<PackedM31> {
         let column = self.get_column(id);
         column
-            .chunks_exact(N_LANES)
+            .as_chunks::<N_LANES>()
+            .0
+            .iter()
             .map(|c| PackedM31::from_array(std::array::from_fn(|i| BaseField::from(c[i]))))
             .collect::<Vec<_>>()
     }
@@ -534,7 +535,7 @@ impl PreprocessedCircuit {
         let preprocessed_trace = self.preprocessed_trace.get_trace::<SimdBackend>();
         let preprocessed_trace_polys =
             SimdBackend::interpolate_columns(preprocessed_trace, &twiddles);
-        let preprocessed_tree = CommitmentTreeProver::<SimdBackend, Blake2sM31MerkleChannel>::new(
+        let preprocessed_tree = CommitmentTreeProver::<SimdBackend, Blake2sMerkleChannel>::new(
             preprocessed_trace_polys,
             log_blowup_factor,
             &twiddles,

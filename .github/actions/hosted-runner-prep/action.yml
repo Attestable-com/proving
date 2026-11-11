@@ -1,0 +1,53 @@
+name: Prepare a GitHub-hosted runner
+description: >
+  Frees disk space and computes a CPU-model cache key, for jobs that run on generic GitHub-hosted
+  runners (see the RUNNER_* repository variables in ci.yml).
+
+  GitHub-hosted runners do not all have the same CPU model. A job built with
+  `-C target-cpu=native` must not restore a cache built on a different CPU, or the restored
+  binaries can fail with SIGILL. Pass `cpu-key` as the `key` of Swatinem/rust-cache.
+
+inputs:
+  free-disk:
+    description: Remove preinstalled toolchains we do not use (Android, .NET, Haskell).
+    default: "true"
+  require-avx512:
+    description: Fail with a clear message if the CPU does not support AVX-512F.
+    default: "false"
+
+outputs:
+  cpu-key:
+    description: A short hash of the CPU model and flags.
+    value: ${{ steps.cpu.outputs.key }}
+
+runs:
+  using: composite
+  steps:
+    - name: Free disk space
+      if: ${{ inputs.free-disk == 'true' && runner.os == 'Linux' }}
+      uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
+      with:
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: false
+        tool-cache: false
+    - name: Compute CPU cache key
+      id: cpu
+      shell: bash
+      run: |
+        if [ -r /proc/cpuinfo ]; then
+          info=$(grep -m1 '^model name' /proc/cpuinfo; grep -m1 '^flags' /proc/cpuinfo)
+        else
+          info=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || uname -m)
+        fi
+        echo "CPU: $(echo "$info" | head -1)"
+        echo "key=cpu-$(echo "$info" | sha256sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
+    - name: Check AVX-512 support
+      if: ${{ inputs.require-avx512 == 'true' }}
+      shell: bash
+      run: |
+        if ! grep -qw avx512f /proc/cpuinfo; then
+          echo "::error::This runner's CPU has no AVX-512F. Set the RUNNER_LARGE repository variable to a runner label with AVX-512."
+          exit 1
+        fi

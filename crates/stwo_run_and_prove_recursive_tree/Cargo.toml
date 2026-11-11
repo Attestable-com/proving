@@ -18,15 +18,17 @@ name = "stwo_run_and_prove_recursive_tree"
 path = "src/lib.rs"
 
 [features]
-# Gates the end-to-end fold test: it proves a real multiverifier circuit per pair (over a
-# pre-generated leaf-proof fixture), too time/memory-heavy for the regular `tests` CI job.
-slow-tests = []
+# Too heavy for the regular `tests` CI job. Gates:
+# - the end-to-end fold tests, which prove real circuits;
+# - `test_support`, which proves the leaf they fold.
+slow-tests = ["dep:leaf-prover", "dep:num-bigint"]
 
 [dependencies]
 # Host Blake2s for recomputing a leaf's output digests from its output preimage.
 blake2 = "0.10"
 clap.workspace = true
 leaf-proof-format.workspace = true
+mimalloc = "0.1"
 serde.workspace = true
 serde_json.workspace = true
 sonic-rs.workspace = true
@@ -38,7 +40,6 @@ thiserror.workspace = true
 tracing.workspace = true
 
 circuit-cairo-serialize.workspace = true
-circuit-multiverifier.workspace = true
 circuit-registry.workspace = true
 circuit-verifier.workspace = true
 circuit-common = { workspace = true, features = ["prover"] }
@@ -48,12 +49,16 @@ circuits.workspace = true
 circuits-stark-verifier.workspace = true
 stwo.workspace = true
 
+# Used by `test_support` to prove a leaf.
+leaf-prover = { workspace = true, optional = true }
+num-bigint = { workspace = true, optional = true }
+
 [dev-dependencies]
+applicative-unpacking-verifier.workspace = true
+circuits-unpacker.workspace = true
+starknet-crypto.workspace = true
 tracing-subscriber.workspace = true
 tempfile.workspace = true
-num-bigint.workspace = true
-leaf-prover.workspace = true
 # The committed compiled-bootloader fixtures' program-hash snapshot test.
 cairo-program-runner-lib.workspace = true
-cairo-vm.workspace = true
 expect-test.workspace = true

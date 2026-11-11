@@ -183,7 +183,7 @@ pub fn encode_and_hash_memory_section(section: &MemorySection) -> [u32; 8] {
     // Cairo blake uses little-endian byte order for the output as well, so we need to reverse each
     // 4-byte limb.
     let limbs: Vec<u32> =
-        digest_bytes.chunks_exact(4).map(|l| u32::from_le_bytes(l.try_into().unwrap())).collect();
+        digest_bytes.as_chunks::<4>().0.iter().map(|l| u32::from_le_bytes(*l)).collect();
 
     limbs.try_into().unwrap()
 }

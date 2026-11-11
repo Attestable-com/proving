@@ -1,4 +1,4 @@
-use circuits::blake::{HashValue, ReducedHashValue};
+use circuits::blake::HashValue;
 use circuits::wrappers::M31Wrapper;
 use circuits_stark_verifier::fri_proof::{FriCommitProof, FriProof, FriWitness};
 use circuits_stark_verifier::merkle::{AuthPath, AuthPaths};
@@ -26,7 +26,6 @@ impl CircuitSerialize for Proof<QM31> {
             eval_domain_samples,
             eval_domain_auth_paths,
             oods_pow_nonce,
-            pow_nonce,
             interaction_pow_nonce,
             fri,
         } = self;
@@ -43,7 +42,6 @@ impl CircuitSerialize for Proof<QM31> {
         eval_domain_samples.serialize(output);
         eval_domain_auth_paths.serialize(output);
         oods_pow_nonce.serialize(output);
-        pow_nonce.serialize(output);
         interaction_pow_nonce.serialize(output);
         fri.serialize(output);
     }
@@ -81,21 +79,13 @@ impl<T: CircuitSerialize> CircuitSerialize for Vec<T> {
     }
 }
 
-impl CircuitSerialize for ReducedHashValue<QM31> {
-    fn serialize(&self, output: &mut Vec<u8>) {
-        let Self(a, b) = self;
-        a.serialize(output);
-        b.serialize(output);
-    }
-}
-
 impl CircuitSerialize for HashValue<QM31> {
     fn serialize(&self, output: &mut Vec<u8>) {
         // Each word is stored as `(low_u16, high_u16, 0, 0)`; recombine it into its 32-bit value
         // and write the four little-endian bytes, so the whole hash occupies exactly 32 bytes.
         let Self(words) = self;
         for word in words {
-            let (low, high) = (word.get().0.0.0, word.get().0.1.0);
+            let (low, high) = (word.raw().0.0.0, word.raw().0.1.0);
             output.extend_from_slice(&((high << 16) | low).to_le_bytes());
         }
     }
@@ -128,7 +118,7 @@ impl CircuitSerialize for AuthPaths<QM31> {
 impl CircuitSerialize for M31Wrapper<QM31> {
     fn serialize(&self, output: &mut Vec<u8>) {
         // M31Wrapper wraps a value known to be in the base field M31.
-        let m31: M31 = self.get().0.0;
+        let m31: M31 = self.raw().0.0;
         m31.serialize(output);
     }
 }
@@ -164,8 +154,9 @@ impl CircuitSerialize for FriWitness<QM31> {
 
 impl CircuitSerialize for FriProof<QM31> {
     fn serialize(&self, output: &mut Vec<u8>) {
-        let Self { commit, auth_paths, witness } = self;
+        let Self { commit, pow_nonce, auth_paths, witness } = self;
         commit.serialize(output);
+        pow_nonce.serialize(output);
         auth_paths.serialize(output);
         witness.serialize(output);
     }

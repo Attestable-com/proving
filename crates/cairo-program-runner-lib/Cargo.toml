@@ -10,7 +10,7 @@ description = "Library for running Cairo programs on the Cairo VM with hint supp
 [dependencies]
 leaf-proof-format.workspace = true
 anyhow.workspace = true
-cairo-vm.workspace = true
+cairo-vm = { workspace = true, features = ["extensive_hints", "mod_builtin"] }
 cairo-lang-executable.workspace = true
 cairo-lang-runner.workspace = true
 cairo-lang-casm.workspace = true
@@ -24,6 +24,7 @@ serde_json.workspace = true
 sonic-rs.workspace = true
 starknet-crypto.workspace = true
 starknet-types-core.workspace = true
+stwo-cairo-utils.workspace = true
 thiserror.workspace = true
 thiserror-no-std.workspace = true
 tracing.workspace = true

@@ -317,7 +317,7 @@ pub struct PackedFelt252 {
     pub value: [PackedM31; FELT252_N_WORDS],
 }
 impl PackedFelt252 {
-    pub fn get_m31(&self, index: usize) -> PackedM31 {
+    pub fn get_m31_limb(&self, index: usize) -> PackedM31 {
         self.value[index]
     }
 
@@ -415,7 +415,7 @@ impl EqExtend for PackedM31 {
             value: self
                 .into_simd()
                 .simd_eq(other.into_simd())
-                .to_int()
+                .to_simd()
                 .bitand(Simd::splat(1))
                 .cast(),
         }

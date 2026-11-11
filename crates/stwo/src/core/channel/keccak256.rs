@@ -112,8 +112,10 @@ impl Channel for Keccak256Channel {
         self.n_draws += 1;
         Keccak256Hasher::hash(&hash_input)
             .0
-            .chunks_exact(4)
-            .map(|chunk| u32::from_be_bytes(chunk.try_into().unwrap()))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|chunk| u32::from_be_bytes(*chunk))
             .collect()
     }
 

@@ -1,8 +1,8 @@
 use std_shims::{ToString, Vec};
 
 use super::Hasher;
-use crate::core::channel::{Blake2sChannelGeneric, Channel, Keccak256Channel};
-use crate::core::vcs::blake2_hash::{Blake2sHash, Blake2sM31Hasher};
+use crate::core::channel::{Blake2sChannel, Channel, Keccak256Channel};
+use crate::core::vcs::blake2_hash::Blake2sHash;
 use crate::core::vcs::keccak256_hash::Keccak256Hash;
 use crate::core::vcs_lifted::blake2_merkle::Blake2sMerkleHasher;
 use crate::core::vcs_lifted::keccak256_merkle::Keccak256MerkleHasher;
@@ -11,7 +11,7 @@ const WORDS: [u32; 9] = [0, 1, 2, 3, 0x1234_5678, u32::MAX, 7, 8, 9];
 
 #[test]
 fn blake2s_hash_u32s() {
-    // Little endian words, as `Blake2sChannelGeneric::mix_u32s` encodes them.
+    // Little endian words, as `Blake2sChannel::mix_u32s` encodes them.
     assert_eq!(
         Blake2sMerkleHasher::hash_u32s(&WORDS).to_string(),
         "efee1538e0216d3a09ce742ce768c44a7db004d801c40f66040994353f55fe85"
@@ -134,10 +134,10 @@ fn hash_u32s_distinguishes_lengths() {
 /// `mix_u32s(words)` equals `hash_u32s(digest_words ++ words)`.
 #[test]
 fn blake2s_hash_u32s_matches_mix_u32s() {
-    let mut channel = Blake2sChannelGeneric::<false>::default();
+    let mut channel = Blake2sChannel::default();
     // Advance the channel, so that the digest prefix is not the default one.
     channel.mix_u64(1);
-    let prefix: Vec<u32> = channel.digest().0.chunks_exact(4).map(le_word).collect();
+    let prefix: Vec<u32> = channel.digest().0.as_chunks::<4>().0.iter().map(le_word).collect();
     channel.mix_u32s(&WORDS);
 
     assert_eq!(
@@ -146,24 +146,11 @@ fn blake2s_hash_u32s_matches_mix_u32s() {
     );
 }
 
-/// The `M31`-reduced Blake2s is a different hash function with the same digest type; keying
-/// [`Hasher`] on the hasher type, rather than on the digest, is what keeps the two apart.
-#[test]
-fn blake2s_m31_hash_u32s_matches_mix_u32s() {
-    let mut channel = Blake2sChannelGeneric::<true>::default();
-    channel.mix_u64(1);
-    let prefix: Vec<u32> = channel.digest().0.chunks_exact(4).map(le_word).collect();
-    channel.mix_u32s(&WORDS);
-
-    assert_eq!(channel.digest(), Blake2sM31Hasher::hash_u32s(&[prefix, WORDS.to_vec()].concat()));
-    assert_ne!(Blake2sM31Hasher::hash_u32s(&WORDS), Blake2sMerkleHasher::hash_u32s(&WORDS));
-}
-
 #[test]
 fn keccak256_hash_u32s_matches_mix_u32s() {
     let mut channel = Keccak256Channel::default();
     channel.mix_u64(1);
-    let prefix: Vec<u32> = channel.digest().0.chunks_exact(4).map(be_word).collect();
+    let prefix: Vec<u32> = channel.digest().0.as_chunks::<4>().0.iter().map(be_word).collect();
     channel.mix_u32s(&WORDS);
 
     assert_eq!(
@@ -193,10 +180,10 @@ fn poseidon252_hash_u32s_matches_mix_u32s() {
     );
 }
 
-fn le_word(bytes: &[u8]) -> u32 {
-    u32::from_le_bytes(bytes.try_into().unwrap())
+fn le_word(bytes: &[u8; 4]) -> u32 {
+    u32::from_le_bytes(*bytes)
 }
 
-fn be_word(bytes: &[u8]) -> u32 {
-    u32::from_be_bytes(bytes.try_into().unwrap())
+fn be_word(bytes: &[u8; 4]) -> u32 {
+    u32::from_be_bytes(*bytes)
 }

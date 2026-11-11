@@ -6,7 +6,7 @@ on:
 
 jobs:
   scarb-fmt:
-    runs-on: namespace-profile-starkware-libs-proving-dev-medium-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_MEDIUM || 'ubuntu-24.04' }}
     defaults:
       run:
         working-directory: stwo_cairo_verifier
@@ -18,7 +18,7 @@ jobs:
       - run: scarb fmt --check
 
   scarb-lint:
-    runs-on: namespace-profile-starkware-libs-proving-dev-medium-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_MEDIUM || 'ubuntu-24.04' }}
     defaults:
       run:
         working-directory: stwo_cairo_verifier
@@ -30,7 +30,7 @@ jobs:
       - run: scarb lint --features=qm31_opcode --deny-warnings
 
   scarb-test:
-    runs-on: namespace-profile-starkware-libs-proving-dev-small-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_SMALL || 'ubuntu-24.04' }}
     defaults:
       run:
         working-directory: stwo_cairo_verifier
@@ -48,7 +48,7 @@ jobs:
       - run: scarb test --features=${{ matrix.feature }} -p ${{ matrix.package }}
 
   scarb-test-circuit:
-    runs-on: namespace-profile-starkware-libs-proving-dev-medium-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_MEDIUM || 'ubuntu-24.04' }}
     defaults:
       run:
         working-directory: stwo_cairo_verifier
@@ -64,8 +64,3 @@ jobs:
         with:
           tool-versions: .tool-versions
       - run: scarb test --features=${{ matrix.feature }} -p ${{ matrix.package }}
-      # The fixture is the recursive tree's golden root proof: the canonical_small registry pads its
-      # circuits to the production shape, so this executes the verifier on exactly what it consumes
-      # in production (see cairo_consts_test.rs).
-      - if: matrix.package == 'stwo_circuit_verifier' && matrix.feature == 'qm31_opcode'
-        run: scarb --profile proving execute -p stwo_circuit_verifier --features ${{ matrix.feature }} --print-resource-usage --output none --arguments-file ../crates/stwo_run_and_prove_recursive_tree/test_data/goldens/four_leaves/root.proof

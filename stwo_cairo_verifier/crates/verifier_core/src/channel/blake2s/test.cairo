@@ -1,5 +1,5 @@
 use core::box::BoxImpl;
-use crate::channel::blake2s::{Blake2sChannel, ChannelTrait, check_leading_zeros};
+use crate::channel::blake2s::{Blake2sChannel, ChannelTrait, check_leading_zeros, new_channel};
 use crate::fields::qm31::qm31_const;
 use crate::vcs::blake2s_hasher::Blake2sHash;
 
@@ -285,6 +285,27 @@ fn test_check_proof_of_work_with_invalid_n_bits() {
     assert!(!res);
 }
 
+// Same values as the circuit verifier's `test_pow_regression` and the Rust `test_verify_pow_nonce`.
+#[test]
+fn test_verify_pow_nonce() {
+    let channel = new_channel(
+        Blake2sHash {
+            hash: BoxImpl::new(
+                [
+                    968886948, 725376924, 836084817, 484428276, 1805658819, 300032261, 172116750,
+                    994058243,
+                ],
+            ),
+        },
+    );
+
+    assert!(channel.verify_pow_nonce(10, 649));
+    assert!(!channel.verify_pow_nonce(11, 649));
+    assert!(!channel.verify_pow_nonce(9, 649));
+    assert!(!channel.verify_pow_nonce(10, 648));
+    assert!(!channel.verify_pow_nonce(10, 650));
+}
+
 #[test]
 fn test_blake_u32s() {
     let mut channel: Blake2sChannel = Default::default();
@@ -310,7 +331,7 @@ fn test_draw_secure_felt() {
 
     // Tested against values produced from Rust code.
     // https://github.com/starkware-libs/stwo/blob/dev/crates/prover/src/core/channel/blake2s.rs
-    assert_eq!(felt, qm31_const::<1508103417, 49928118, 1851109195, 649450964>());
+    assert_eq!(felt, qm31_const::<1607959653, 1002527476, 1398396019, 67013898>());
 }
 
 #[test]
@@ -324,14 +345,14 @@ fn test_draw_secure_felts() {
     assert_eq!(
         felts,
         array![
-            qm31_const::<1508103417, 49928118, 1851109195, 649450964>(),
-            qm31_const::<1514800545, 2089281384, 523819246, 1919080973>(),
-            qm31_const::<1769619091, 1335149496, 2007506569, 1426464368>(),
-            qm31_const::<853727757, 1673676888, 635879929, 1327640380>(),
-            qm31_const::<1751831125, 1559795173, 442209472, 1280396692>(),
-            qm31_const::<1528893536, 644814910, 503157674, 286565543>(),
-            qm31_const::<1839261536, 1778992654, 807858428, 143171319>(),
-            qm31_const::<128590986, 1618375851, 213276683, 76892197>(),
+            qm31_const::<1607959653, 1002527476, 1398396019, 67013898>(),
+            qm31_const::<144950789, 565468011, 2053597886, 1143677042>(),
+            qm31_const::<576454177, 855519209, 671039709, 1076288760>(),
+            qm31_const::<1102279550, 1094201066, 1217859041, 367061077>(),
+            qm31_const::<467172210, 1084656950, 1059980591, 1137233454>(),
+            qm31_const::<365873393, 1732845274, 774277962, 892979872>(),
+            qm31_const::<226119429, 1746258861, 812369014, 1685182917>(),
+            qm31_const::<1356430388, 1427468863, 1241931671, 1433257830>(),
         ],
     );
 }

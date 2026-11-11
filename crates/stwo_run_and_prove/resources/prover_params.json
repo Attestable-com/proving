@@ -1,12 +1,12 @@
 {
     "channel_hash": "blake2s",
-    "fri_config": {
+    "fri_params": {
         "pow_bits": 26,
         "log_blowup_factor": 1,
         "log_last_layer_degree_bound": 0,
         "n_queries": 70
     },
-    "preprocessed_trace": "canonical_without_pedersen",
+    "preprocessed_trace_variant": "canonical_without_pedersen",
     "include_all_preprocessed_columns": false,
     "store_polynomials_coefficients": false,
     "channel_salt": 0,

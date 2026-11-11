@@ -1,7 +1,7 @@
 name: stwo-circuits CI
 
 env:
-  NIGHTLY_VERSION: "nightly-2026-01-15"
+  NIGHTLY_VERSION: "nightly-2026-07-06"
 
 on:
   workflow_call:
@@ -19,9 +19,10 @@ permissions:
 
 jobs:
   run-tests:
-    runs-on: namespace-profile-starkware-libs-proving-dev-xlarge-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_XLARGE || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: ./.github/actions/hosted-runner-prep
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: ${{ env.NIGHTLY_VERSION }}

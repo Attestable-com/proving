@@ -86,7 +86,7 @@ RUST_GROUPS: dict[str, Group] = {
             Crate("crates/circuit_verifier", "circuit-verifier"),
             Crate("crates/circuit_cairo_serialize", "circuit-cairo-serialize"),
             Crate("crates/circuit_common", "circuit-common"),
-            Crate("crates/circuit_multiverifier", "circuit-multiverifier"),
+            Crate("crates/applicative_unpacking_verifier", "applicative-unpacking-verifier"),
             Crate("crates/circuit_serialize", "circuit-serialize"),
             Crate("crates/circuit_prover", "circuit-prover", stable_check=False),
             Crate("crates/stark_verifier", "circuits-stark-verifier"),
@@ -105,6 +105,7 @@ RUST_GROUPS: dict[str, Group] = {
             Crate("crates/vm_runner", "stwo-vm-runner"),
             Crate("crates/privacy_prove", "privacy-prove", stable_check=False),
             Crate("crates/privacy_circuit_verify", "privacy-circuit-verify"),
+            Crate("crates/privacy_common", "privacy_common"),
             Crate("crates/leaf_prover", "leaf-prover", stable_check=False),
             Crate("crates/leaf_proof_format", "leaf-proof-format"),
             Crate("crates/circuit_params", "circuit-params", stable_check=False),
@@ -140,8 +141,6 @@ RUST_GROUPS: dict[str, Group] = {
 STWO_CAIRO_VERIFIER_GROUP: list[str] = [
     "stwo_cairo_verifier/",
     ".github/workflows/stwo-cairo-verifier-ci.yml",
-    # The circuit verifier's execution fixture (see stwo-cairo-verifier-ci.yml).
-    "crates/stwo_run_and_prove_recursive_tree/test_data/goldens/four_leaves/root.proof",
 ]
 
 # Paths whose change forces every CI flow to run.
@@ -210,7 +209,11 @@ def decide_flows_to_run(changed_paths: Optional[set[str]]) -> dict[str, bool]:
         or run_stwo_air_infra
     )
     run_stwo_circuits = run_stwo_cairo_prover or is_group_changed["stwo_circuits"]
-    run_proving_utils = run_stwo_circuits or is_group_changed["proving_utils"]
+    # Cairo-verifier changes also run proving-utils: its recursive-tree e2e is the only flow that
+    # executes the circuit Cairo verifier on a real root proof.
+    run_proving_utils = (
+        run_stwo_circuits or run_stwo_cairo_verifier or is_group_changed["proving_utils"]
+    )
 
     return {
         "run_stwo": run_stwo,

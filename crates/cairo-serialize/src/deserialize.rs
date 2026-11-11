@@ -3,7 +3,7 @@ use std::array;
 use starknet_ff::FieldElement;
 use stwo::core::fields::m31::BaseField;
 use stwo::core::fields::qm31::SecureField;
-use stwo::core::fri::{FriConfig, FriLayerProof, FriProof};
+use stwo::core::fri::{FriLayerProof, FriParams, FriProof};
 use stwo::core::poly::line::LinePoly;
 use stwo::core::vcs::blake2_hash::Blake2sHash;
 use stwo::core::vcs_lifted::MerkleHasherLifted;
@@ -107,7 +107,8 @@ where
         let first_layer = FriLayerProof::deserialize(data);
         let inner_layers = Vec::deserialize(data);
         let last_layer_poly = LinePoly::deserialize(data);
-        FriProof { first_layer, inner_layers, last_layer_poly }
+        let proof_of_work = u64::deserialize(data);
+        FriProof { first_layer, inner_layers, last_layer_poly, proof_of_work }
     }
 }
 
@@ -117,14 +118,14 @@ impl CairoDeserialize for FieldElement {
     }
 }
 
-impl CairoDeserialize for FriConfig {
+impl CairoDeserialize for FriParams {
     fn deserialize<'a>(data: &mut impl Iterator<Item = &'a FieldElement>) -> Self {
         let pow_bits = u32::deserialize(data);
         let log_blowup_factor = u32::deserialize(data);
         let log_last_layer_degree_bound = u32::deserialize(data);
         let n_queries = usize::deserialize(data);
         let fold_step = u32::deserialize(data);
-        FriConfig { pow_bits, log_blowup_factor, log_last_layer_degree_bound, n_queries, fold_step }
+        FriParams { pow_bits, log_blowup_factor, log_last_layer_degree_bound, n_queries, fold_step }
     }
 }
 
@@ -178,8 +179,7 @@ impl<T0: CairoDeserialize, T1: CairoDeserialize, T2: CairoDeserialize> CairoDese
 impl CairoDeserialize for Blake2sHash {
     fn deserialize<'a>(data: &mut impl Iterator<Item = &'a FieldElement>) -> Self {
         let mut bytes = [0u8; 32];
-        for byte_chunk in bytes.chunks_exact_mut(4) {
-            let byte_chunk: &mut [u8; 4] = byte_chunk.try_into().unwrap();
+        for byte_chunk in bytes.as_chunks_mut::<4>().0 {
             let v: u32 = u32::deserialize(data);
             *byte_chunk = v.to_le_bytes();
         }

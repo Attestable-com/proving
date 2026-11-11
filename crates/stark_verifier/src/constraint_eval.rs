@@ -69,7 +69,7 @@ impl<'a, Value: IValue> ComponentDataTrait<Value> for ComponentData<'a> {
     }
 
     fn get_n_instances_bit(&self, context: &mut Context<Value>, bit: usize) -> Var {
-        Simd::unpack_idx(context, &self.n_instances_bits[bit], self.index)
+        *Simd::unpack_idx(context, &self.n_instances_bits[bit], self.index).raw()
     }
 
     fn max_component_size_bits(&self) -> usize {
@@ -278,10 +278,7 @@ pub fn compute_composition_polynomial<Value: IValue>(
 
     for (component_index, (((component, component_shape), &claimed_sum), &component_size)) in
         zip_eq(
-            zip_eq(
-                zip_eq(statement.get_components().values(), &config.component_shapes),
-                claimed_sums,
-            ),
+            zip_eq(zip_eq(statement.get_components(), &config.component_shapes), claimed_sums),
             component_sizes,
         )
         .enumerate()

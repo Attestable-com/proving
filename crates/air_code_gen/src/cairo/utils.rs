@@ -47,24 +47,24 @@ pub fn gen_consts(air_fn: &CompiledAirFn) -> rust::Tokens {
             pub const N_INTERACTION_COLUMNS: usize = $(n_logup_columns(air_fn));
         });
 
-        if !is_const_size_component(air_fn) {
-            let uses = air_fn
-                .constraint_lookups
-                .iter()
-                .filter(|(_, use_or_yield)| matches!(use_or_yield, UseOrYield::Use))
-                .collect::<Vec<_>>();
-            let mut uses_count = IndexMap::new();
-            for (relation, _) in &uses {
-                *(uses_count.entry(relation.clone()).or_insert(0)) += 1;
-            }
-            consts.extend(quote! {
-                pub const RELATION_USES_PER_ROW: [(felt252, u32); $(uses_count.keys().len())] = [
-                    $(uses_count.iter().map(|(relation, count)| {
-                        format!(r#"('{relation}', {count})"#)
-                    }).collect::<Vec<_>>().join(", "))
-                ];
-            });
+        // Emitted for every component, empty when it uses no relations, so the relation-uses
+        // check can cover all of them.
+        let uses = air_fn
+            .constraint_lookups
+            .iter()
+            .filter(|(_, use_or_yield)| matches!(use_or_yield, UseOrYield::Use))
+            .collect::<Vec<_>>();
+        let mut uses_count = IndexMap::new();
+        for (relation, _) in &uses {
+            *(uses_count.entry(relation.clone()).or_insert(0)) += 1;
         }
+        consts.extend(quote! {
+            pub const RELATION_USES_PER_ROW: [(felt252, u32); $(uses_count.keys().len())] = [
+                $(uses_count.iter().map(|(relation, count)| {
+                    format!(r#"('{relation}', {count})"#)
+                }).collect::<Vec<_>>().join(", "))
+            ];
+        });
     }
 
     if is_const_size_component(air_fn) {
@@ -90,18 +90,13 @@ pub fn gen_imports(air_fn: &CompiledAirFn) -> rust::Tokens {
     code
 }
 
-/// Create an expression that evaluates to the log size of the current AirFn
-/// air_fn - The AirFn
-/// in_claim - If true, return code that works inside the generated `Claim` struct (where the type
-/// of `self` is `Claim`). Otherwise, return code that works inside the generated `Eval` struct
-/// (where the type of `self` is `Eval`).
-pub fn get_log_size(air_fn: &CompiledAirFn, in_claim: bool) -> rust::Tokens {
+/// Create an expression that evaluates to the log size of the current AirFn inside the generated
+/// `Component` (where the type of `self` is `Component`).
+pub fn get_log_size(air_fn: &CompiledAirFn) -> rust::Tokens {
     if is_const_size_component(air_fn) {
         quote! { LOG_SIZE }
-    } else if in_claim {
-        quote! { *(self.log_size) }
     } else {
-        quote! { *(self.claim.log_size) }
+        quote! { *(self.log_size) }
     }
 }
 
@@ -114,15 +109,8 @@ pub fn n_logup_columns(air_fn: &CompiledAirFn) -> usize {
     QM31_EXTENSION_DEGREE * n_batches
 }
 
-pub fn make_preprocessed_column(
-    external_state: &ExternalState,
-    log_size_expr: &rust::Tokens,
-) -> rust::Tokens {
-    if external_state == "Seq" {
-        quote! { seq_column_idx($(log_size_expr)) }
-    } else {
-        quote! { $(&external_state.to_case(Case::Constant))_IDX }
-    }
+pub fn make_preprocessed_column(external_state: &ExternalState) -> rust::Tokens {
+    quote! { $(&external_state.to_case(Case::Constant))_IDX }
 }
 
 pub fn format_cairo_code(code_text: String) -> String {
@@ -159,7 +147,7 @@ pub(super) fn get_numerators(air_fn: &CompiledAirFn) -> Vec<String> {
     (0..air_fn.constraint_lookups.len()).map(|idx| format!("numerator_{idx}")).collect()
 }
 
-pub(super) fn get_lookup_sums(air_fn: &CompiledAirFn) -> Vec<String> {
+pub(super) fn get_logup_sums(air_fn: &CompiledAirFn) -> Vec<String> {
     air_fn
         .constraint_lookups
         .iter()

@@ -1,4 +1,5 @@
 use circuits::context::{Context, TraceContext};
+use circuits::extract_bits::extract_bits;
 use circuits::ivalue::{NoValue, qm31_from_u32s};
 use circuits::ops::Guess;
 use circuits::test_utils::{finalize_guessed_vars, simd_from_u32s};
@@ -11,7 +12,7 @@ use crate::oods::{
     EvalDomainSamples, OodsResponse, compute_fri_input, empty_eval_domain_samples,
     extract_expected_composition_eval,
 };
-use crate::select_queries::select_queries;
+use crate::select_queries::{Queries, select_queries};
 
 #[test]
 fn test_eval_domain_samples_guess_circuit() {
@@ -106,7 +107,9 @@ fn test_compute_fri_input_regression() {
 
     let input = simd_from_u32s(&mut context, vec![0, 21, 26]);
     let log_domain_size = 5;
-    let queries = select_queries(&mut context, &input, log_domain_size);
+    let bits = extract_bits(&mut context, &input, log_domain_size);
+    let points = select_queries(&mut context, &bits);
+    let queries = Queries { bits, points };
 
     let trace_queries_vars: Vec<Vec<M31>> = vec![
         vec![1.into(), 1.into(), 1.into()],

@@ -32,8 +32,6 @@ pub struct CommitmentSchemeProof<H: MerkleHasherLifted> {
     pub sampled_values: TreeVec<ColumnVec<Vec<SecureField>>>,
     pub decommitments: TreeVec<MerkleDecommitmentLifted<H>>,
     pub queried_values: TreeVec<ColumnVec<Vec<BaseField>>>,
-    /// Proof of work nonce ground before the FRI query positions are drawn.
-    pub proof_of_work: u64,
     pub fri_proof: FriProof<H>,
 }
 
@@ -286,7 +284,7 @@ pub fn build_samples_with_randomness_and_periodicity(
     });
     let mut res: Vec<Vec<Vec<(PointSample, SecureField)>>> = Vec::new();
     let lifting_domain_generator = CanonicCoset::new(lifting_log_size).step();
-    for (samples_per_tree, sizes_per_tree) in samples.iter().zip(column_log_sizes.into_iter()) {
+    for (samples_per_tree, sizes_per_tree) in samples.iter().zip(column_log_sizes) {
         let samples_with_randomness_and_periodicity = samples_per_tree
             .iter()
             .zip(sizes_per_tree)

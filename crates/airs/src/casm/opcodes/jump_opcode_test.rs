@@ -449,7 +449,7 @@ fn test_rel_double_deref() {
 }
 
 pub fn assemble_jump(op0_off: Option<i16>, op1_off: Option<i16>, flags: [bool; 15]) -> u128 {
-    let off0 = op0_off.map_or(-1, |v| v);
-    let off1 = op1_off.map_or(1, |v| v);
+    let off0 = op0_off.unwrap_or(-1);
+    let off1 = op1_off.unwrap_or(1);
     assemble_instruction(-1, off0, off1, flags, OpcodeExtension::Stone)
 }

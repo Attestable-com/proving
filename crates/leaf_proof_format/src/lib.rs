@@ -1,5 +1,5 @@
 //! The JSON wire formats of the proving pipeline's binaries: the leaf prover's proof output
-//! ([`SerializedLeafProof`]) and the recursive tree prover's packed-output tree ([`PackedNode`]).
+//! ([`SerializedLeafProof`]) and the recursive tree prover's packed node tree ([`PackedNode`]).
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::base64::Base64;
@@ -19,8 +19,8 @@ pub struct DigestHex(pub [u32; N_DIGEST_WORDS]);
 impl From<[u8; 32]> for DigestHex {
     fn from(bytes: [u8; 32]) -> Self {
         let mut words = [0u32; N_DIGEST_WORDS];
-        for (word, src) in words.iter_mut().zip(bytes.chunks_exact(4)) {
-            *word = u32::from_le_bytes(src.try_into().unwrap());
+        for (word, src) in words.iter_mut().zip(bytes.as_chunks::<4>().0) {
+            *word = u32::from_le_bytes(*src);
         }
         DigestHex(words)
     }
@@ -58,7 +58,7 @@ pub struct SerializedLeafProof {
     pub proof: Vec<u8>,
 }
 
-/// The recursive tree prover's nested packed-output tree, one `Composite` per verifier node:
+/// The recursive tree prover's nested packed node tree, one `Composite` per verifier node:
 ///
 /// ```text
 /// Composite { subtasks: [left, right] }   // a fold: the multiverifier over two children
@@ -72,21 +72,22 @@ pub struct SerializedLeafProof {
 /// circuit output — bottom-up from the preimages.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PackedNode {
-    /// A leaf's hashed-output preimage — the task's program hash followed by the task's raw output
-    /// (each felt a decimal string; see the recursive tree's `LeafInput::output_preimage`).
+    /// A leaf's hashed-output preimage — the task's program hash followed by the task's raw output.
+    /// The preimage felts are stored as decimal strings.
+    // TODO(yair): store the preimage felts as felt252s rather than decimal strings.
     Plain { output_preimage: Vec<String> },
     /// A verifier node — a fold over two children, a self-fold over one `Composite` child (the
     /// single-leaf tree's root pass, where the multiverifier verifies the same proof in both
     /// slots), or the leaf circuit over its single `Plain` child. Carries the `circuit_hash` of
-    /// this node's proof (eight little-endian u32 words) — the full circuit identity
+    /// this node's proof (a [`DigestHex`]) — the full circuit identity
     /// (`blake2s(log_blowup ‖ component_log_sizes ‖ preprocessed_root)`) that the unpacker mixes
     /// into this node's fold contribution and looks up in its supported trust list.
-    Composite { circuit_hash: [u32; N_DIGEST_WORDS], subtasks: Vec<PackedNode> },
+    Composite { circuit_hash: DigestHex, subtasks: Vec<PackedNode> },
 }
 
 impl PackedNode {
     /// A leaf entry: the leaf circuit node over the `Plain` preimage reveal.
-    pub fn leaf(circuit_hash: [u32; N_DIGEST_WORDS], output_preimage: Vec<String>) -> Self {
+    pub fn leaf(circuit_hash: DigestHex, output_preimage: Vec<String>) -> Self {
         PackedNode::Composite {
             circuit_hash,
             subtasks: vec![PackedNode::Plain { output_preimage }],
@@ -111,18 +112,18 @@ mod tests {
     }
 
     /// The packed tree round-trips through its externally tagged JSON, with circuit hashes as
-    /// plain word arrays (the encoding the tree prover writes and the bootloader hints read).
+    /// [`DigestHex`] (the encoding the tree prover writes and the bootloader hints read).
     #[test]
     fn test_packed_node_round_trips() {
-        let leaf = PackedNode::leaf([1, 2, 3, 4, 5, 6, 7, 8], vec!["11".to_string()]);
+        let leaf = PackedNode::leaf(DigestHex([1, 2, 3, 4, 5, 6, 7, 8]), vec!["11".to_string()]);
         let tree = PackedNode::Composite {
-            circuit_hash: [9; N_DIGEST_WORDS],
+            circuit_hash: DigestHex([9; N_DIGEST_WORDS]),
             subtasks: vec![leaf.clone(), leaf],
         };
 
         let json: serde_json::Value =
             serde_json::from_str(&serde_json::to_string(&tree).unwrap()).unwrap();
-        assert_eq!(json["Composite"]["circuit_hash"][0], 9);
+        assert_eq!(json["Composite"]["circuit_hash"][0], "0x00000009");
         assert_eq!(
             json["Composite"]["subtasks"][0]["Composite"]["subtasks"][0]["Plain"]
                 ["output_preimage"][0],
@@ -136,7 +137,7 @@ mod tests {
     /// lets consumers use it without re-validating its length.
     #[test]
     fn test_packed_node_rejects_wrong_length_circuit_hash() {
-        let json = r#"{"Composite":{"circuit_hash":[1,2,3],"subtasks":[]}}"#;
+        let json = r#"{"Composite":{"circuit_hash":["0x1","0x2","0x3"],"subtasks":[]}}"#;
         assert!(serde_json::from_str::<PackedNode>(json).is_err());
     }
 }

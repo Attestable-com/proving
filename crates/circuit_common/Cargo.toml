@@ -8,11 +8,10 @@ prover = ["stwo/parallel", "stwo/prover", "stwo-constraint-framework/parallel", 
 
 [dependencies]
 itertools.workspace = true
-rand_chacha.workspace = true
 
 stwo.workspace = true
+stwo-cairo-utils.workspace = true
 stwo-constraint-framework.workspace = true
-stwo_cairo_common.workspace = true
 
 circuits.workspace = true
 circuits-stark-verifier.workspace = true

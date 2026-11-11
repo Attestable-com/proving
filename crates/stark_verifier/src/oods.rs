@@ -36,7 +36,7 @@ impl<T> EvalDomainSamples<T> {
 
     /// Returns the sampled value for the given trace, query, and column.
     pub fn at(&self, trace_idx: usize, column_idx: usize, query_idx: usize) -> &T {
-        self.data[trace_idx][column_idx][query_idx].get()
+        self.data[trace_idx][column_idx][query_idx].raw()
     }
 
     /// Returns the data vector for the given trace.
@@ -132,7 +132,7 @@ pub fn extract_expected_composition_eval(
     context: &mut Context<impl IValue>,
     composition_eval_at_oods: &[Var; N_COMPOSITION_COLUMNS],
     oods_point: CirclePoint<Var>,
-    max_log_degree_bound: usize,
+    max_log_degree_bound: u32,
 ) -> Var {
     let composition_eval_at_oods_left =
         from_partial_evals(context, composition_eval_at_oods[0..4].try_into().unwrap());

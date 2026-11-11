@@ -73,8 +73,8 @@ impl MerkleHasherLifted for Poseidon252MerkleHasher {
 }
 
 pub fn poseidon_update(values: &[FieldElement252], state: &mut [FieldElement252; 3]) {
-    let mut iter = values.chunks_exact(2);
-    for msg in iter.by_ref() {
+    let (chunks, _) = values.as_chunks::<2>();
+    for msg in chunks {
         state[0] += msg[0];
         state[1] += msg[1];
         poseidon_permute_comp(state);
@@ -85,13 +85,12 @@ pub fn poseidon_finalize(
     values: &[FieldElement252],
     mut state: [FieldElement252; 3],
 ) -> [FieldElement252; 3] {
-    let mut iter = values.chunks_exact(2);
-    for msg in iter.by_ref() {
+    let (chunks, r) = values.as_chunks::<2>();
+    for msg in chunks {
         state[0] += msg[0];
         state[1] += msg[1];
         poseidon_permute_comp(&mut state);
     }
-    let r = iter.remainder();
     if r.len() == 1 {
         state[0] += r[0];
     }

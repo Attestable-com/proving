@@ -11,7 +11,7 @@ use rayon::prelude::*;
 use tracing::{Level, span};
 
 use super::SimdBackend;
-use super::fft::{CACHED_FFT_LOG_SIZE, MIN_FFT_LOG_SIZE, ifft, rfft};
+use super::fft::{CACHED_FFT_LOG_SIZE, MIN_FFT_LOG_SIZE, TwiddleTreeView, ifft, rfft};
 use super::m31::{LOG_N_LANES, N_LANES, PackedBaseField};
 use super::qm31::PackedSecureField;
 use crate::core::circle::{CirclePoint, CirclePointIndex, Coset, M31_CIRCLE_LOG_ORDER};
@@ -20,7 +20,7 @@ use crate::core::fields::m31::BaseField;
 use crate::core::fields::qm31::SecureField;
 use crate::core::fields::{Field, FieldExpOps, batch_inverse};
 use crate::core::poly::circle::{CanonicCoset, CircleDomain};
-use crate::core::poly::utils::{domain_line_twiddles_from_tree, fold, get_folding_alphas};
+use crate::core::poly::utils::{fold, get_folding_alphas};
 use crate::core::utils::{SliceExt, bit_reverse_index};
 use crate::prover::backend::cpu::circle::slow_precompute_twiddles;
 use crate::prover::backend::simd::column::BaseColumn;
@@ -144,13 +144,13 @@ impl PolyOps for SimdBackend {
         }
 
         let mut values = eval.values;
-        let twiddles = domain_line_twiddles_from_tree(eval.domain, &twiddles.itwiddles);
+        let twiddles = TwiddleTreeView::new(&twiddles.itwiddles).sub_tree(eval.domain.log_size());
 
         // Safe because [PackedBaseField] is aligned on 64 bytes.
         unsafe {
             ifft::ifft(
                 transmute::<*mut PackedBaseField, *mut u32>(values.data.as_mut_ptr()),
-                &twiddles,
+                twiddles,
                 log_size as usize,
             );
         }
@@ -408,33 +408,17 @@ impl PolyOps for SimdBackend {
             );
         }
 
-        let twiddles = domain_line_twiddles_from_tree(domain, &twiddles.twiddles);
+        let twiddles = TwiddleTreeView::new(&twiddles.twiddles).sub_tree(log_size);
 
-        // Evaluate on big domains by evaluating on several subdomains.
-        let log_subdomains = log_size - fft_log_size;
-
-        for i in 0..(1 << log_subdomains) {
-            // The subdomain twiddles are a slice of the large domain twiddles.
-            let subdomain_twiddles = (0..(fft_log_size - 1))
-                .map(|layer_i| {
-                    &twiddles[layer_i as usize]
-                        [i << (fft_log_size - 2 - layer_i)..(i + 1) << (fft_log_size - 2 - layer_i)]
-                })
-                .collect::<Vec<_>>();
-
-            // FFT from the coefficients buffer directly into the provided buffer.
-            unsafe {
-                rfft::fft(
-                    transmute::<*const PackedBaseField, *const u32>(poly.coeffs.data.as_ptr()),
-                    transmute::<*mut PackedBaseField, *mut u32>(
-                        buffer.data[i << (fft_log_size - LOG_N_LANES)
-                            ..(i + 1) << (fft_log_size - LOG_N_LANES)]
-                            .as_mut_ptr(),
-                    ),
-                    &subdomain_twiddles,
-                    fft_log_size as usize,
-                );
-            }
+        // Evaluate on big domains by evaluating on several subdomains, from the coefficients buffer
+        // directly into the provided buffer.
+        unsafe {
+            rfft::fft_subdomains(
+                poly.coeffs.data.as_ptr().cast::<u32>(),
+                buffer.data.as_mut_ptr().cast::<u32>(),
+                twiddles,
+                fft_log_size as usize,
+            );
         }
 
         CircleEvaluation::new(domain, buffer)

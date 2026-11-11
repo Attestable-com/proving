@@ -139,7 +139,7 @@ impl Simd {
 
     /// Multiplies all the elements of `a` by the scalar `b`.
     pub fn scalar_mul(context: &mut Context<impl IValue>, a: &Simd, b: &M31Wrapper<Var>) -> Simd {
-        Simd { data: a.data.iter().map(|x| mul(context, *x, *b.get())).collect(), len: a.len }
+        Simd { data: a.data.iter().map(|x| mul(context, *x, *b.raw())).collect(), len: a.len }
     }
 
     /// Returns an *unconstrained* [Simd] initialized (hint) with `1/x` if `x != 0`,
@@ -199,12 +199,23 @@ impl Simd {
 
     /// Unpacks a [Simd] into a vector of [Var]s, where each [Var] represents a single [M31] value.
     pub fn unpack(context: &mut Context<impl IValue>, input: &Simd) -> Vec<Var> {
-        (0..input.len).map(|i| Self::unpack_idx(context, input, i)).collect_vec()
+        (0..input.len).map(|i| *Self::unpack_idx(context, input, i).raw()).collect_vec()
     }
 
     /// Unpacks the `idx`-th [M31] value from the [Simd].
-    pub fn unpack_idx(context: &mut Context<impl IValue>, input: &Simd, idx: usize) -> Var {
-        *get_coord(context, &input.data[idx / 4], idx % 4).get()
+    pub fn unpack_idx(
+        context: &mut Context<impl IValue>,
+        input: &Simd,
+        idx: usize,
+    ) -> M31Wrapper<Var> {
+        assert!(idx < input.len, "Index {idx} is out of range for a Simd of length {}", input.len);
+        get_coord(context, &input.data[idx / 4], idx % 4)
+    }
+
+    /// Unpacks the single [M31] value of a [Simd] of length 1.
+    pub fn unpack_single(context: &mut Context<impl IValue>, input: &Simd) -> M31Wrapper<Var> {
+        assert_eq!(input.len, 1);
+        Self::unpack_idx(context, input, 0)
     }
 
     /// Packs a vector of [M31] values into [Simd].
@@ -214,17 +225,22 @@ impl Simd {
         let n = values.len();
         let data = (0..n.div_ceil(4))
             .map(|i| {
-                let mut res = *values[4 * i].get();
+                let mut res = *values[4 * i].raw();
                 for j in 1..4 {
                     if 4 * i + j == n {
                         break;
                     }
-                    res = eval!(context, (res) + ((unit_vecs[j]) * (*values[4 * i + j].get())));
+                    res = eval!(context, (res) + ((unit_vecs[j]) * (*values[4 * i + j].raw())));
                 }
                 res
             })
             .collect();
         Simd::from_packed(data, values.len())
+    }
+
+    /// Takes a single [M31] value and represents it as a [Simd] of length 1.
+    pub fn pack_single(value: M31Wrapper<Var>) -> Simd {
+        Simd::from_packed(vec![*value.raw()], 1)
     }
 
     /// Computes `2^n` per lane, where `n` is the integer whose little-endian bit decomposition
@@ -244,25 +260,6 @@ impl Simd {
             if bit_idx < bits.len() - 1 {
                 pow2 = eval!(context, (pow2) * (pow2));
             }
-        }
-        res
-    }
-
-    /// Packs little-endian bit-slices into a SIMD integer.
-    /// This is the inverse of `extract_bits`.
-    ///
-    /// Assumes each `bits[i]` contains only 0/1 values;
-    /// returns Σ `bits[i] * (1 << i)` per lane.
-    ///
-    /// `bits` must be non-empty and have at most 30 elements (so the result fits in M31 without
-    /// wrapping — 31 all-one bits would produce 2^31 - 1 = M31::P ≡ 0).
-    pub fn combine_bits(context: &mut Context<impl IValue>, bits: &[Simd]) -> Simd {
-        let mut iter = bits.iter().rev();
-        let mut res = iter.next().unwrap().clone();
-        let two = M31Wrapper::const_m31(context, 2.into());
-        for bit in iter {
-            res = Simd::scalar_mul(context, &res, &two);
-            res = eval!(context, (res) + (*bit));
         }
         res
     }

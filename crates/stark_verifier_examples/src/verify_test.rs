@@ -3,8 +3,9 @@ use circuits::context::{Context, TraceContext};
 use circuits::ivalue::NoValue;
 use circuits::ops::Guess;
 use circuits_stark_verifier::fri_proof::compute_all_fold_steps;
-use circuits_stark_verifier::proof::{ProofConfig, ProofInfo, empty_proof};
+use circuits_stark_verifier::proof::{ProofConfig, empty_proof};
 use circuits_stark_verifier::proof_from_stark_proof::proof_from_stark_proof;
+use circuits_stark_verifier::proof_info::ProofInfo;
 use circuits_stark_verifier::verify::verify;
 use num_traits::One;
 use rstest::rstest;
@@ -43,7 +44,7 @@ fn test_verify(#[case] proof_modifier: ProofModifier) {
         let empty_proof = empty_proof(&config);
         let mut novalue_context = Context::<NoValue>::default();
         let proof_vars = empty_proof.guess(&mut novalue_context);
-        let statement = SimpleStatement::new(&mut novalue_context);
+        let statement = SimpleStatement::default();
         verify(&mut novalue_context, &proof_vars, &config, &statement);
         novalue_context.finalize(false).context.circuit
     };
@@ -79,7 +80,7 @@ fn test_verify(#[case] proof_modifier: ProofModifier) {
     let mut context = TraceContext::default();
     let proof = proof_from_stark_proof(&proof, &config, claim, interaction_pow_nonce, channel_salt);
     let proof_vars = proof.guess(&mut context);
-    let statement = SimpleStatement::new(&mut context);
+    let statement = SimpleStatement::default();
     verify(&mut context, &proof_vars, &config, &statement);
     let context = context.finalize(true);
 
@@ -91,14 +92,14 @@ fn test_verify(#[case] proof_modifier: ProofModifier) {
         ProofModifier::WrongTraceAuthPath => {
             let err = result.unwrap_err();
             // The error should be when comparing the main trace root (word-by-word).
-            let expected_value = context.get(*proof_vars.trace_root.0[0].get());
+            let expected_value = context.get(*proof_vars.trace_root.0[0].raw());
             assert!(err.contains(&expected_value.to_string()));
         }
         ProofModifier::WrongFriAuthPath => {
             let err = result.unwrap_err();
             // The error should be when comparing the first layer Merkle root (word-by-word).
             let expected_value =
-                context.get(*proof_vars.fri.commit.layer_commitments[0].0[0].get());
+                context.get(*proof_vars.fri.commit.layer_commitments[0].0[0].raw());
             assert!(err.contains(&expected_value.to_string()));
         }
         ProofModifier::WrongFriWitness => {
@@ -107,11 +108,11 @@ fn test_verify(#[case] proof_modifier: ProofModifier) {
             // coset. `validate_query_position_in_coset` selects the value at the query's
             // local index (`queried_pos`'s low `last_step` bits) in the last-layer coset.
             let fold_steps = compute_all_fold_steps(
-                config.log_trace_size - config.fri.log_last_layer_degree_bound as usize,
-                config.fri.fold_step as usize,
+                config.log_trace_size() - config.fri.params.log_last_layer_degree_bound,
+                config.fri.params.fold_step,
             );
             let last_step = *fold_steps.last().unwrap();
-            let shift: usize = fold_steps.iter().sum::<usize>() - last_step;
+            let shift = fold_steps.iter().sum::<u32>() - last_step;
             let queried_pos = first_query >> shift;
             let index_in_coset = queried_pos & ((1 << last_step) - 1);
             let expected_value =

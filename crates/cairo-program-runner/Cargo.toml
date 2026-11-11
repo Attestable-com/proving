@@ -9,16 +9,12 @@ description = "CLI tool for running Cairo programs on the Cairo VM"
 
 [dependencies]
 bincode = { version = "2.0.1", features = ["serde"] }
-cairo-vm.workspace = true
+cairo-vm = { workspace = true, features = ["clap"] }
 clap.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 cairo-program-runner-lib.workspace = true
 stwo-cairo-utils.workspace = true
-
-[dev-dependencies]
-assert_matches.workspace = true
-rstest.workspace = true
 
 [[bin]]
 name = "cairo_program_runner"

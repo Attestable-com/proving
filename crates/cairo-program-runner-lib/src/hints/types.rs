@@ -405,6 +405,15 @@ pub struct PrivacySimpleBootloaderInput {
     pub output_preimage_dump_path: PathBuf,
 }
 
+/// The aggregator wrapper task's program input: the aggregator task it runs, and the dump paths
+/// for the poseidon preimage and (optionally) the aggregated-output fact topology.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AggregatorWrapperInput {
+    pub task: TaskSpec,
+    pub poseidon_preimage_dump_path: PathBuf,
+    pub fact_topologies_path: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct BootloaderInput {
     #[serde(flatten)]
@@ -532,7 +541,9 @@ pub struct SimpleOutputInput {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ConcatAggregatorInput {
-    pub bootloader_output: Vec<Number>,
+    /// The bootloader output holding the task records, every felt a `0x`-prefixed hex string (a
+    /// program hash does not fit a JSON number).
+    pub bootloader_output: Vec<Felt252>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

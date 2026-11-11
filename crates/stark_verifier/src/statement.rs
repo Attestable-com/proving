@@ -4,8 +4,7 @@ use circuits::blake::HashValue;
 use circuits::context::{Context, Var};
 use circuits::ivalue::IValue;
 use circuits::simd::Simd;
-use circuits::wrappers::U32Wrapper;
-use indexmap::IndexMap;
+use circuits::wrappers::{M31Wrapper, U32Wrapper};
 use stwo::core::circle::CirclePoint;
 use stwo_constraint_framework::preprocessed_columns::PreProcessedColumnId;
 
@@ -22,7 +21,7 @@ pub struct OodsSamples<'a> {
 pub struct EvaluateArgs<'a> {
     pub oods_samples: OodsSamples<'a>,
     pub pt: CirclePoint<Var>,
-    pub log_domain_size: usize,
+    pub log_domain_size: u32,
     pub composition_polynomial_coeff: Var,
     pub interaction_elements: [Var; 2],
     pub claimed_sums: &'a [Var],
@@ -41,10 +40,13 @@ pub trait Statement<Value: IValue> {
     /// transcript as mixing the felts directly.
     fn claims_to_mix(&self, context: &mut Context<Value>) -> Vec<Vec<U32Wrapper<Var>>>;
 
-    /// Returns the AIR components that define the constraint system.
-    fn get_components(&self) -> &IndexMap<&'static str, Box<dyn CircuitEval<Value>>>;
+    /// Returns the AIR components that define the constraint system, in the order the prover
+    /// appended their traces to the commitment trees.
+    fn get_components(&self) -> Vec<&dyn CircuitEval<Value>>;
 
-    fn get_component_log_sizes(&self) -> &Simd;
+    /// Packs the per-component trace log sizes into a [`Simd`] (in the order of
+    /// [`Self::get_components`]), adding the packed values to `context`.
+    fn pack_component_log_sizes(&self, context: &mut Context<Value>) -> Simd;
 
     /// Returns the IDs of the preprocessed columns used by this statement's components.
     fn get_preprocessed_column_ids(&self) -> Vec<PreProcessedColumnId>;
@@ -61,21 +63,12 @@ pub trait Statement<Value: IValue> {
         HashMap::new()
     }
 
-    /// Whether the trace and interaction query columns must be sorted by (log size,
-    /// column index) before Merkle leaf hashing during decommitment, to match the order
-    /// in which those columns were committed to the Merkle tree. Returns `true` by
-    /// default, matching the standard verifier behavior. Statements whose column order
-    /// already matches the committed order can override this to `false` to skip sorting.
-    fn sorting_required(&self) -> bool {
-        true
-    }
-
     /// Performs statement-level consistency checks on the claim.
     fn verify_claim(
         &self,
         _context: &mut Context<Value>,
         _component_sizes: &[Var],
-        _shifted_relation_uses: &HashMap<String, Var>,
+        _shifted_relation_uses: &HashMap<String, M31Wrapper<Var>>,
     ) {
     }
 }

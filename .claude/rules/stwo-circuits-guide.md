@@ -9,7 +9,6 @@ paths:
   - "crates/stark_verifier_examples/**"
   - "crates/circuit_serialize/**"
   - "crates/circuit_cairo_serialize/**"
-  - "crates/circuit_multiverifier/**"
   - "crates/unpacker/**"
 ---
 
@@ -40,22 +39,22 @@ crates/
     src/prover.rs            prove_circuit() — main proving entry point
     src/circuit_air/components/   [AIR-GENERATED] 15 circuit components + subroutines/
     src/witness/             Trace and interaction-trace generation
-  circuit_verifier/          [SOUNDNESS-CRITICAL] Circuit constraint definitions
+  circuit_verifier/          [SOUNDNESS-CRITICAL] Circuit constraint definitions and multi-proof verification
     src/components/          [AIR-GENERATED] constraint evaluators (Eq, QM31Ops, Blake*, XOR*, RangeCheck*)
+    src/multiverifier.rs     Multi-proof verification circuit builder
+    src/zk_blinding.rs       add_zk_blinding() — random rows that blind the witness components for ZK
   cairo_verifier/            [SOUNDNESS-CRITICAL] Cairo constraint definitions  (pkg: circuit-cairo-verifier)
     src/components/          [AIR-GENERATED] 50+ opcode/builtin evaluators + subroutines/
     src/all_components.rs    [AIR-GENERATED] Component registry
-    src/privacy.rs           Privacy-related circuit logic
     src/verify.rs            Cairo AIR verification entry point
   stark_verifier/            [SOUNDNESS-CRITICAL] STARK proof verification  (pkg: circuits-stark-verifier)
     src/fri.rs               [SOUNDNESS-CRITICAL] FRI protocol verification
     src/oods.rs              [SOUNDNESS-CRITICAL] Out-of-domain sampling
     src/merkle.rs            [SECURITY-CRITICAL]  Blake2s Merkle authentication
-    src/proof.rs             ProofInfo — proof-size breakdown (see Metrics)
+    src/proof_info.rs        ProofInfo — proof-size breakdown (see Metrics); `test-utils` feature
   stark_verifier_examples/   Example verifiers and test utilities
   circuit_serialize/         Proof serialization/deserialization
   circuit_cairo_serialize/   Cairo-side serialization
-  circuit_multiverifier/     Multi-proof verification
   unpacker/                  Proof unpacking utilities
 ```
 
@@ -93,7 +92,8 @@ crates/
 8. **Finalization/preprocessing** — `circuit_common` bridges DSL and prover:
    `finalize_context()` hashes constants (Blake) and adds their hash as public outputs, then
    pads Eq/QM31Ops/Blake components to powers of two (min `N_LANES=16`); `add_zk_blinding()`
-   injects randomness for ZK; `PreprocessedCircuit::preprocess_circuit()` builds the fixed
+   (in `circuit_verifier::zk_blinding`, next to the AIR whose columns it blinds) injects
+   randomness for ZK; `PreprocessedCircuit::preprocess_circuit()` builds the fixed
    preprocessed trace.
 
 ## Metrics
@@ -108,7 +108,8 @@ No built-in timing; wrap with `std::time::Instant` or profile externally. Becaus
 `circuit-prover`/`stwo` are opt-level 3 in tests, test-time measurements approximate release.
 
 **Proof size** — measured in `u32` elements (×4 for bytes). `ProofInfo::from_config(&config)`
-in `stark_verifier/src/proof.rs` computes a full breakdown without an actual proof:
+in `stark_verifier/src/proof_info.rs` (behind the `test-utils` feature; enable it from
+`[dev-dependencies]`) computes a full breakdown without an actual proof:
 
 | Component | Scaling |
 |-----------|---------|

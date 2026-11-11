@@ -1,0 +1,136 @@
+use circuit_common::N_RESERVED;
+use circuits::blake::{HashValue, blake2s_u32s};
+use circuits::context::{Context, FinalizedContext, Var};
+use circuits::ivalue::{IValue, NoValue};
+use circuits::ops::Guess;
+use circuits_stark_verifier::order_hash_map::OrderedHashMap;
+use circuits_stark_verifier::proof::{Proof, ProofConfig, empty_proof};
+use circuits_stark_verifier::verify::verify;
+use itertools::{Itertools, chain};
+use stwo::core::pcs::PcsConfig;
+use stwo_constraint_framework::preprocessed_columns::PreProcessedColumnId;
+
+use crate::statement::{CircuitStatement, circuit_verifier_proof_config};
+use crate::verify::CircuitConfig;
+
+/// A circuit proof together with metadata needed to build the [`CircuitStatement`] against which
+/// the proof will be verified. The verifying circuit expects the output gates of a verified
+/// circuit to hold its output digest (`N_RESERVED` QM31, the unreduced Blake2s digest) + 1 QM31
+/// equal to [`circuits::context::U_VALUE`] coming from the constant finalization mechanism (see
+/// [`circuits::finalize_constants`]).
+#[derive(Clone)]
+pub struct CircuitVerifierInput<Value: IValue> {
+    /// A circuit proof.
+    pub proof: Proof<Value>,
+    /// The preprocessed root of the circuit associated to `proof`.
+    pub preprocessed_root: HashValue<Value>,
+    /// The output digest of the circuit.
+    pub output_digest: HashValue<Value>,
+}
+
+/// Configurations shared by the circuits being verified by the multiverifier and their proofs.
+/// These values are static and fixed in advance.
+pub struct SharedConfig {
+    pub pcs_config: PcsConfig,
+    pub proof_config: ProofConfig,
+    pub preprocessed_column_log_sizes: OrderedHashMap<PreProcessedColumnId, u32>,
+}
+
+/// Builds a circuit that verifies `k` circuit proofs (a `k`-to-1 fold node).
+///
+/// For each [`CircuitVerifierInput`], the function reconstructs the inner
+/// [`CircuitStatement`] from `shared_config` and the per-proof
+/// `preprocessed_root` and `output_digest`, and runs the STARK verifier.
+///
+/// After all `k` proofs are verified, each circuit's [`CircuitStatement::circuit_hash`] (the hash
+/// of its shared config and preprocessed root) is concatenated with the inner circuit's output
+/// values, and both circuits' words are hashed together. The resulting unreduced Blake2s digest is
+/// written into the outer circuit's `N_RESERVED` reserved output variables.
+/// The circuit is then finalized.
+///
+/// All proofs must have been produced with the same [`SharedConfig`]. `inputs` must be non-empty;
+/// its length is the fold arity `k`.
+///
+/// The child ordering of the hash preimage is a byte-identity contract with any out-of-circuit
+/// code that recomputes this digest: both concatenate the children left-to-right, and per child
+/// emit `[circuit_hash words, output words]`. Any arity change must keep this ordering identical
+/// on both sides.
+pub fn build_multiverifier_circuit<Value: IValue>(
+    inputs: Vec<CircuitVerifierInput<Value>>,
+    shared_config: &SharedConfig,
+) -> FinalizedContext<Value> {
+    assert!(!inputs.is_empty(), "multiverifier node needs at least one input");
+    let mut context = Context::new(N_RESERVED);
+
+    let mut outer_verifier_output_preimage = vec![];
+    // Verify the `k` proofs sequentially, in the fixed left-to-right order of `inputs`.
+    for input in inputs {
+        let (circuit_hash, output_digest) = verify_child(&mut context, input, shared_config);
+        // Append (circuit_hash, output_digest) to the preimage of the outer hash.
+        outer_verifier_output_preimage.extend(chain!(circuit_hash, output_digest));
+    }
+    // The payload to be hashed is, for each of the `k` verified circuits (left to right), the eight
+    // 32-bit words of its circuit hash followed by its `N_RESERVED` raw output words:
+    // [
+    //      circuit_hash_0 (8 words), outputs_0 (N_RESERVED words),
+    //      circuit_hash_1 (8 words), outputs_1 (N_RESERVED words),
+    //      ... (k children total, in the order of `inputs`)
+    // ].
+    let n_bytes = 4 * outer_verifier_output_preimage.len();
+    let output_hash = blake2s_u32s(&mut context, outer_verifier_output_preimage, n_bytes);
+    // Copy the unreduced digest words into the reserved variables.
+    context.set_outputs(&output_hash.iter().map(|word| *word.raw()).collect_vec());
+
+    let context = context.finalize(false);
+    #[cfg(test)]
+    context.circuit().check_yields();
+    context
+}
+
+/// Verifies one circuit proof in-circuit: guesses the child's output digest and its per-proof
+/// `preprocessed_root` (each word range-constrained to a valid `u32` packing), reconstructs its
+/// [`CircuitStatement`] from those and `shared_config`, guesses the proof, and runs the STARK
+/// verifier. Returns the statement's in-circuit `circuit_hash` together with the guessed output
+/// digest.
+pub fn verify_child<Value: IValue>(
+    context: &mut Context<Value>,
+    input: CircuitVerifierInput<Value>,
+    shared_config: &SharedConfig,
+) -> (HashValue<Var>, HashValue<Var>) {
+    let CircuitVerifierInput { proof, preprocessed_root, output_digest } = input;
+
+    let circuit_config = CircuitConfig {
+        config: shared_config.pcs_config,
+        preprocessed_column_log_sizes: shared_config.preprocessed_column_log_sizes.clone(),
+    };
+    let output_digest = output_digest.guess(context);
+    let preprocessed_root = preprocessed_root.guess(context);
+    let statement =
+        CircuitStatement::new(context, &circuit_config, preprocessed_root, output_digest);
+    let proof_vars = proof.guess(context);
+
+    verify(context, &proof_vars, &shared_config.proof_config, &statement);
+    (statement.circuit_hash, statement.output_digest)
+}
+
+/// The [`SharedConfig`] for verifying proofs of a circuit with the given preprocessed-trace
+/// layout — everything a multiverifier needs to know about the circuits it verifies.
+pub fn shared_config(
+    preprocessed_column_log_sizes: OrderedHashMap<PreProcessedColumnId, u32>,
+    pcs_config: PcsConfig,
+) -> SharedConfig {
+    let proof_config = circuit_verifier_proof_config(&preprocessed_column_log_sizes, &pcs_config);
+    SharedConfig { pcs_config, proof_config, preprocessed_column_log_sizes }
+}
+
+/// Builds the multiverifier circuit topology that verifies two proofs described by `shared_config`.
+pub fn build_multiverifier_context_from_shared_config(
+    shared_config: &SharedConfig,
+) -> FinalizedContext<NoValue> {
+    let empty_input = || CircuitVerifierInput {
+        proof: empty_proof(&shared_config.proof_config),
+        preprocessed_root: HashValue::no_value(),
+        output_digest: HashValue::no_value(),
+    };
+    build_multiverifier_circuit::<NoValue>(vec![empty_input(), empty_input()], shared_config)
+}

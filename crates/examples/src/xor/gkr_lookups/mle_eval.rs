@@ -1,6 +1,4 @@
 //! Multilinear extension (MLE) eval at point constraints.
-// TODO(andrew): Remove in downstream PR.
-#![allow(dead_code)]
 
 use std::iter::zip;
 
@@ -744,7 +742,7 @@ mod tests {
     use stwo::core::circle::SECURE_FIELD_CIRCLE_GEN;
     use stwo::core::fields::m31::BaseField;
     use stwo::core::fields::qm31::SecureField;
-    use stwo::core::fri::FriConfig;
+    use stwo::core::fri::FriParams;
     use stwo::core::pcs::{CommitmentSchemeVerifier, PcsConfig, TreeVec};
     use stwo::core::poly::circle::CanonicCoset;
     use stwo::core::utils::{bit_reverse, coset_order_to_circle_domain_order};
@@ -793,10 +791,10 @@ mod tests {
                 .circle_domain()
                 .half_coset,
         );
-        let fri_config = FriConfig::default();
+        let fri_params = FriParams::test_params();
         let config = PcsConfig {
-            fri_config,
-            trace_lifting_log_size: log_size + fri_config.log_blowup_factor,
+            fri_params,
+            trace_lifting_log_size: log_size + fri_params.log_blowup_factor,
             // The preprocessed tree is empty, so it is not lifted.
             preprocessed_lifting_log_size: 0,
         };
@@ -859,7 +857,6 @@ mod tests {
         const N_VARIABLES: usize = 8;
         const COEFFS_COL_TRACE: usize = 1;
         const MLE_EVAL_TRACE: usize = 2;
-        const CONST_TRACE: usize = 2;
         const LOG_EXPAND: u32 = 1;
         // Create the test MLE.
         let mut rng = SmallRng::seed_from_u64(0);
@@ -875,10 +872,10 @@ mod tests {
                 .circle_domain()
                 .half_coset,
         );
-        let fri_config = FriConfig::default();
+        let fri_params = FriParams::test_params();
         let config = PcsConfig {
-            fri_config,
-            trace_lifting_log_size: log_size + fri_config.log_blowup_factor,
+            fri_params,
+            trace_lifting_log_size: log_size + fri_params.log_blowup_factor,
             // The preprocessed tree is empty, so it is not lifted.
             preprocessed_lifting_log_size: 0,
         };

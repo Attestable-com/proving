@@ -253,7 +253,7 @@ pub fn cond_flip_u32(
     a: U32Wrapper<Var>,
     b: U32Wrapper<Var>,
 ) -> (U32Wrapper<Var>, U32Wrapper<Var>) {
-    let (res_a, res_b) = cond_flip(context, selector, *a.get(), *b.get());
+    let (res_a, res_b) = cond_flip(context, selector, *a.raw(), *b.raw());
     (U32Wrapper::new_unsafe(res_a), U32Wrapper::new_unsafe(res_b))
 }
 
@@ -285,22 +285,31 @@ pub fn guess_m31<Value: IValue>(
     value: M31Wrapper<Value>,
 ) -> M31Wrapper<Var> {
     context.stats.guess += 1;
-    let out = context.new_var(*value.get());
+    let out = context.new_var(*value.raw());
     context.guessed_vars.as_mut().unwrap().push(GuessVar::M31(out));
     M31Wrapper::new_unsafe(out)
 }
 
-/// Computes the map `(a, b, c, d) -> a + b * i + c * u + d * iu`. Note that the input values are
-/// not necessarily in the base field `M31`.
+/// Returns `a + b * i + c * u + d * iu`, where `[a, b, c, d] = values`: a secure column's value at
+/// a point, given its four coordinate polynomials' values there. Mirrors
+/// [`QM31::from_partial_evals`].
+///
+/// The values are not necessarily in the base field `M31`; for `M31` coordinates use
+/// [`qm31_from_coords`].
 pub fn from_partial_evals(context: &mut Context<impl IValue>, values: [Var; 4]) -> Var {
-    let i = context.constant(qm31_from_u32s(0, 1, 0, 0));
-    let u = context.constant(qm31_from_u32s(0, 0, 1, 0));
+    let i = context.i();
+    let u = context.u();
     let iu = context.constant(qm31_from_u32s(0, 0, 0, 1));
 
     eval!(
         context,
         (((values[0]) + ((values[1]) * (i))) + ((values[2]) * (u))) + ((values[3]) * (iu))
     )
+}
+
+/// Returns the QM31 whose coordinates in the `{1, i, u, iu}` basis are `coords`.
+pub fn qm31_from_coords(context: &mut Context<impl IValue>, coords: [M31Wrapper<Var>; 4]) -> Var {
+    from_partial_evals(context, coords.map(|coord| *coord.raw()))
 }
 
 /// A trait for creating [Var]s from values in a recursive structure.

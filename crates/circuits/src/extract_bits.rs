@@ -1,8 +1,9 @@
 use stwo::core::fields::m31::M31;
 
-use crate::context::Context;
+use crate::context::{Context, Var};
 use crate::eval;
 use crate::ivalue::IValue;
+use crate::ops::{CircuitOps, Guess};
 use crate::simd::Simd;
 use crate::wrappers::M31Wrapper;
 
@@ -10,12 +11,84 @@ use crate::wrappers::M31Wrapper;
 #[path = "extract_bits_test.rs"]
 pub mod test;
 
-/// For each `M31` lane in the given [Simd], returns its `n_bits`-bit binary decomposition.
-/// If `n_bits == 31`, additionally enforces that `0` is encoded canonically as
-/// `0b0000...0000` (and not `0b1111...1111`).
+/// Helper trait for `extract_bits` and `combine_bits` to allow using the same code for both
+/// [M31Wrapper<Var>] and [Simd].
+pub trait BitPackingOps: CircuitOps + Clone {
+    /// Multiplies `self` by the base-field scalar `scalar` (applied to every element of `self` for
+    /// vector types such as [Simd]).
+    fn scalar_mul(&self, context: &mut Context<impl IValue>, scalar: M31Wrapper<Var>) -> Self;
+
+    /// Returns an *unconstrained* bit value initialized (hint) with the LSB of `self` (applied to
+    /// every element of `self` for vector types such as [Simd]).
+    ///
+    /// NOTE: The result is guaranteed to be either 0 or 1, but the caller MUST verify that it is
+    /// indeed the LSB of `self`.
+    fn guess_lsb(&self, context: &mut Context<impl IValue>) -> Self;
+
+    /// Asserts that the value is either 0 or 1.
+    fn assert_bit(&self, context: &mut Context<impl IValue>);
+
+    /// Adds gates to the circuit that assert that `a` and `b` are equal.
+    fn eq(context: &mut Context<impl IValue>, a: &Self, b: &Self);
+}
+
+impl BitPackingOps for M31Wrapper<Var> {
+    fn scalar_mul(&self, context: &mut Context<impl IValue>, scalar: M31Wrapper<Var>) -> Self {
+        eval!(context, (*self) * (scalar))
+    }
+
+    fn guess_lsb(&self, context: &mut Context<impl IValue>) -> Self {
+        // Guess the LSB of the value.
+        let value = context.get(*self.raw()).pointwise_lsb();
+        // Wrapping with `M31Wrapper::new_unsafe` is sound, because of the `assert_bit` call
+        // below.
+        let var = M31Wrapper::new_unsafe(value.guess(context));
+        var.assert_bit(context);
+        var
+    }
+
+    fn assert_bit(&self, context: &mut Context<impl IValue>) {
+        // Make sure self is either 0 or 1 by checking that `self * self == self`.
+        let self_sqr = eval!(context, (*self) * (*self));
+        crate::ops::eq(context, *self.raw(), *self_sqr.raw());
+    }
+
+    fn eq(context: &mut Context<impl IValue>, a: &Self, b: &Self) {
+        crate::ops::eq(context, *a.raw(), *b.raw());
+    }
+}
+
+impl BitPackingOps for Simd {
+    fn scalar_mul(&self, context: &mut Context<impl IValue>, scalar: M31Wrapper<Var>) -> Self {
+        Simd::scalar_mul(context, self, &scalar)
+    }
+
+    fn guess_lsb(&self, context: &mut Context<impl IValue>) -> Self {
+        self.guess_lsb(context)
+    }
+
+    fn assert_bit(&self, context: &mut Context<impl IValue>) {
+        self.assert_bits(context);
+    }
+
+    fn eq(context: &mut Context<impl IValue>, a: &Self, b: &Self) {
+        Simd::eq(context, a, b);
+    }
+}
+
+/// Returns the `n_bits`-bit binary decomposition of `input` (per lane for vector types such as
+/// [Simd]).
 /// If any input exceeds `2^n_bits - 1`, a circuit constraints is going to be violated and
 /// `context.is_circuit_valid()` will return `false`.
-pub fn extract_bits(context: &mut Context<impl IValue>, input: &Simd, n_bits: u32) -> Vec<Simd> {
+///
+/// `n_bits` must be at most 30, so that the decomposition is unique (a 31-bit decomposition
+/// would allow `0` to be represented both as `0b0000...0000` and as `0b1111...1111`).
+pub fn extract_bits<T: BitPackingOps>(
+    context: &mut Context<impl IValue>,
+    input: &T,
+    n_bits: u32,
+) -> Vec<T> {
+    assert!(n_bits <= 30, "extract_bits supports at most 30 bits, got {n_bits}.");
     let inv_two = M31Wrapper::const_m31(context, M31::from(2).inverse());
 
     let mut value = input.clone();
@@ -24,33 +97,32 @@ pub fn extract_bits(context: &mut Context<impl IValue>, input: &Simd, n_bits: u3
         let lsb = value.guess_lsb(context);
         bits.push(lsb.clone());
         value = eval!(context, (value) - (lsb));
-        value = Simd::scalar_mul(context, &value, &inv_two);
+        value = value.scalar_mul(context, inv_two);
     }
 
     // `value` is now the MSB. Check that it is 0 or 1.
-    value.assert_bits(context);
+    value.assert_bit(context);
     bits.push(value.clone());
-
-    if n_bits >= 31 {
-        assert_eq!(n_bits, 31);
-        // Check that `0` is represented as `0b0000...0000`, rather than `0b1111...1111`.
-        validate_extract_bits(context, input, &bits[0]);
-    }
 
     bits
 }
 
-/// Forbids the case `0b1111...1111`, as this number should be represented as `0`.
-fn validate_extract_bits(context: &mut Context<impl IValue>, input: &Simd, lsb: &Simd) {
-    // Add a new variable `aux` and check the constraint:
-    //   (there exists `aux` such that:) `(input * aux - 1) * lsb = 0`,
-    // which guarantees that if the input is 0, then the LSB must be 0.
-    //
-    // If `input != 0`, we simply choose `aux = 1/input` which satisfies the constraint.
-    let zero = Simd::zero(context, input.len());
-    let one = Simd::one(context, input.len());
-
-    let aux = input.guess_inv_or_zero(context);
-    let constraint_val = eval!(context, (((*input) * (aux)) - (one)) * (*lsb));
-    Simd::eq(context, &constraint_val, &zero);
+/// Packs little-endian bits into an integer (per lane for vector types such as [Simd]).
+/// This is the inverse of `extract_bits`.
+///
+/// Assumes each `bits[i]` contains only 0/1 values;
+/// returns `Σ bits[i] * (1 << i)`.
+///
+/// `bits` must be non-empty and have at most 30 elements (so the result fits in M31 without
+/// wrapping).
+pub fn combine_bits<T: BitPackingOps>(context: &mut Context<impl IValue>, bits: &[T]) -> T {
+    assert!(bits.len() <= 30, "combine_bits supports at most 30 bits, got {}.", bits.len());
+    let mut iter = bits.iter().rev();
+    let mut res = iter.next().unwrap().clone();
+    let two = M31Wrapper::const_m31(context, 2.into());
+    for bit in iter {
+        res = res.scalar_mul(context, two);
+        res = eval!(context, (res) + (*bit));
+    }
+    res
 }

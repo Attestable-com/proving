@@ -2,15 +2,16 @@ use blake2::{Blake2s256, Digest};
 use expect_test::expect;
 use itertools::zip_eq;
 use rstest::rstest;
-use stwo::core::vcs::blake2_hash::{Blake2sHash, reduce_to_m31};
+use stwo::core::vcs::blake2_hash::Blake2sHash;
 
-use crate::blake::{HashValue, blake2s, blake2s_m31, qm31_from_bytes};
+use crate::blake::{HashValue, blake2s, blake2s_u32s, unpack_qm31s_to_u32_words};
 use crate::context::TraceContext;
 use crate::ivalue::{IValue, qm31_from_u32s};
 use crate::ops::{Guess, eq, guess};
 use crate::stats::Stats;
 use crate::test_utils::finalize_guessed_vars;
 use crate::utils::bytes_from_le_u32s;
+use crate::wrappers::U32Wrapper;
 
 #[rstest]
 #[case::success(false)]
@@ -33,28 +34,38 @@ fn test_blake(#[case] wrong_output: bool) {
         0, 0, 9, 0, 0, 0, 10, 0, 0, 0, 11, 0, 0, 0, 12, 0, 0, 0, 13, 0, 0, 0, 14, 0, 0, 0, 15, 0,
         0, 0, 16, 0, 0, 0, 17, 0,
     ]);
-    let mut expected_hash: [u8; 32] = reduce_to_m31(hasher.finalize().into());
+    let mut expected_hash: [u8; 32] = hasher.finalize().into();
     if wrong_output {
         expected_hash[0] += 1;
     }
 
-    let output = blake2s_m31(&mut context, &input, 66);
-    let out0 = guess(&mut context, qm31_from_bytes(expected_hash[0..16].try_into().unwrap()));
-    let out1 = guess(&mut context, qm31_from_bytes(expected_hash[16..32].try_into().unwrap()));
-    eq(&mut context, output.0, out0);
-    eq(&mut context, output.1, out1);
+    let input_u32s = unpack_qm31s_to_u32_words(&mut context, input);
+
+    let output = blake2s_u32s(&mut context, input_u32s, 66);
+    for i in 0..8 {
+        use stwo::core::fields::qm31::QM31;
+
+        let out_i = guess(
+            &mut context,
+            *QM31::pack_u32(u32::from_le_bytes(
+                expected_hash[4 * i..4 * i + 4].try_into().unwrap(),
+            ))
+            .raw(),
+        );
+        eq(&mut context, *output.0[i].raw(), out_i);
+    }
 
     assert_eq!(
         context.stats,
         Stats {
-            equals: 2,
-            add: 14,
+            equals: 8,
+            add: 0,
             sub: 0,
-            mul: 37,
+            mul: 15,
             inv: 0,
             div: 0,
-            pointwise_mul: 36,
-            guess: 7,
+            pointwise_mul: 20,
+            guess: 13,
             blake_updates: 2,
             permutation_inputs: 0,
             // The context constructor marks `u` as an output.
@@ -94,13 +105,46 @@ fn test_blake2s() {
     let output = blake2s(&mut context, &input, n_bytes);
 
     for (out_word, exp_word) in zip_eq(output.iter(), expected.iter()) {
-        let exp = guess(&mut context, *exp_word.get());
-        eq(&mut context, *out_word.get(), exp);
+        let exp = guess(&mut context, *exp_word.raw());
+        eq(&mut context, *out_word.raw(), exp);
     }
 
     let context = context.finalize(false);
     context.circuit().check_yields();
     assert!(context.is_circuit_valid());
+}
+
+/// Boundary of the `n_bytes <= 4 * message_u32s.len()` precondition: every byte of every message
+/// word is hashed.
+#[test]
+fn test_blake2s_u32s_n_bytes_fills_message_words() {
+    let mut context = TraceContext::default();
+
+    let words: [u32; 3] = [0x0403_0201, 0x0807_0605, 0x0C0B_0A09];
+    let n_bytes = 4 * words.len();
+    let message_u32s =
+        words.iter().map(|&word| U32Wrapper::const_u32(&mut context, word)).collect();
+
+    let output = blake2s_u32s(&mut context, message_u32s, n_bytes);
+
+    let message_bytes: [u8; 12] = bytes_from_le_u32s(words);
+    let mut hasher = Blake2s256::new();
+    hasher.update(message_bytes);
+    let expected = HashValue::from(Blake2sHash(hasher.finalize().into()));
+    assert_eq!(HashValue(output.0.map(|word| word.get_value(&context))), expected);
+
+    let context = context.finalize(false);
+    context.circuit().check_yields();
+    assert!(context.is_circuit_valid());
+}
+
+#[test]
+#[should_panic(expected = "Cannot hash 5 bytes from 1 message words")]
+fn test_blake2s_u32s_n_bytes_exceeds_message_words() {
+    let mut context = TraceContext::default();
+    let message_u32s = vec![U32Wrapper::const_u32(&mut context, 0)];
+
+    blake2s_u32s(&mut context, message_u32s, 5);
 }
 
 #[test]
@@ -122,10 +166,9 @@ fn test_hash_value_guess() {
     let hash_value = HashValue::from(Blake2sHash(bytes_from_le_u32s(words)));
     let guessed = hash_value.guess(&mut context);
 
-    // Each guessed word must round-trip back to the original raw u32 in full (no `M31::P`
-    // reduction, unlike `ReducedHashValue`).
+    // Each guessed word must round-trip back to the original raw u32 in full.
     for (i, &word) in words.iter().enumerate() {
-        assert_eq!(context.get(*guessed.0[i].get()).unpack_u32(), word);
+        assert_eq!(context.get(*guessed.0[i].raw()).unpack_u32(), word);
     }
 
     finalize_guessed_vars(&mut context);

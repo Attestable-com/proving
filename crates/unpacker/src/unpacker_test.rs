@@ -124,7 +124,7 @@ fn hash_node_ref(left: &Node<QM31>, right: &Node<QM31>) -> HashValue<QM31> {
     let mut hasher = Blake2sHasher::new();
     for hash in [&left.circuit_hash, &left.subtree_hash, &right.circuit_hash, &right.subtree_hash] {
         for word in hash.iter() {
-            hasher.update(&word.get().unpack_u32().to_le_bytes());
+            hasher.update(&word.raw().unpack_u32().to_le_bytes());
         }
     }
     HashValue::from(hasher.finalize())
@@ -151,7 +151,9 @@ fn build_balanced_tree(leaves: &[Node<QM31>]) -> (InputTree, Node<QM31>) {
         leaves.iter().cloned().map(|leaf| (BinaryTree::Leaf(leaf.clone()), leaf)).collect();
     while layer.len() > 1 {
         let mut next: Vec<(InputTree, Node<QM31>)> = layer
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|p| {
                 let circuit_hash = node_circuit_hash();
                 let subtree_hash = hash_node_ref(&p[0].1, &p[1].1);
@@ -195,7 +197,7 @@ fn bind_hash_eq<Value: IValue>(
     b: &HashValue<Var>,
 ) {
     for (x, y) in a.iter().zip(b.iter()) {
-        eq(context, *x.get(), *y.get());
+        eq(context, *x.raw(), *y.raw());
     }
 }
 
@@ -208,7 +210,7 @@ fn bind_node_eq<Value: IValue>(context: &mut Context<Value>, a: &Node<Var>, b: &
 
 /// Re-encodes a [`HashValue<QM31>`] as a `HashValue<Value>`, so one build runs under both.
 fn hash_as<Value: IValue>(hash: &HashValue<QM31>) -> HashValue<Value> {
-    HashValue(std::array::from_fn(|i| U32Wrapper::new_unsafe(Value::from_qm31(*hash[i].get()))))
+    HashValue(std::array::from_fn(|i| U32Wrapper::new_unsafe(Value::from_qm31(*hash[i].raw()))))
 }
 
 /// Re-encodes a concrete [`Node<QM31>`] as a `Node<Value>`.
@@ -331,7 +333,7 @@ fn verify_commitment_fails_on_wrong_shape() {
 fn verify_commitment_fails_on_wrong_root() {
     let (tree, root) = build_balanced_tree(&example_leaves(4));
     // Flip one bit of the root's node hash.
-    let mut node_words: [u32; 8] = std::array::from_fn(|i| root.subtree_hash[i].get().unpack_u32());
+    let mut node_words: [u32; 8] = std::array::from_fn(|i| root.subtree_hash[i].raw().unpack_u32());
     node_words[0] ^= 1;
     let wrong_root =
         Node { circuit_hash: root.circuit_hash, subtree_hash: HashValue::from(node_words) };

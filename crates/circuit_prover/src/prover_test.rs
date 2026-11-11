@@ -2,17 +2,18 @@ use circuit_common::N_RESERVED;
 use circuit_common::finalize::pad_context;
 use circuit_common::preprocessed::PreprocessedCircuit;
 use circuit_verifier::circuit_claim::{
-    CircuitInteractionElements, column_log_sizes_per_tree, lookup_sum,
+    CircuitInteractionElements, column_log_sizes_per_tree, logup_sum,
 };
 use circuit_verifier::statement::{
     INTERACTION_POW_BITS, all_circuit_components, circuit_component_log_sizes,
 };
 use circuit_verifier::verify::{CircuitConfig, verify_circuit};
-use circuits::blake::{blake_g_gate, blake2s_m31, m31_to_u32, triple_xor};
+use circuits::blake::{blake_g_gate, blake2s, m31_to_u32, triple_xor};
 use circuits::context::{Context, Var};
 use circuits::eval;
 use circuits::ivalue::{IValue, NoValue, qm31_from_u32s};
 use circuits::ops::{Guess, guess, permute};
+use circuits::test_utils::guess_m31_from_u32;
 use circuits::utils::le_u32s_from_bytes;
 use circuits::wrappers::{M31Wrapper, U32Wrapper};
 use expect_test::expect;
@@ -21,7 +22,7 @@ use stwo::core::channel::{Channel, MerkleChannel};
 use stwo::core::fields::qm31::QM31;
 use stwo::core::pcs::CommitmentSchemeVerifier;
 use stwo::core::vcs::blake2_hash::Blake2sHash;
-use stwo::core::vcs_lifted::blake2_merkle::{Blake2sM31MerkleChannel, Blake2sMerkleHasher};
+use stwo::core::vcs_lifted::blake2_merkle::{Blake2sMerkleChannel, Blake2sMerkleHasher};
 use stwo::core::vcs_lifted::poseidon252_merkle::Poseidon252MerkleChannel;
 
 use crate::circuit_air::circuit_components::CircuitComponents;
@@ -38,7 +39,7 @@ const N: usize = 1030;
 /// fill the digest width. A circuit verified by the circuit verifier outputs a Blake2s digest;
 /// these test circuits have no digest of their own, so any `u32`-encoded wires will do.
 fn set_digest_outputs(context: &mut Context<QM31>, words: &[U32Wrapper<Var>]) {
-    let outputs: Vec<Var> = words.iter().cycle().take(N_RESERVED).map(|w| *w.get()).collect();
+    let outputs: Vec<Var> = words.iter().cycle().take(N_RESERVED).map(|w| *w.raw()).collect();
     context.set_outputs(&outputs);
 }
 
@@ -87,8 +88,11 @@ pub fn build_blake_context() -> Context<QM31> {
         ));
     }
     for _ in 0..n_blakes {
-        let output = blake2s_m31(&mut context, &inputs, n_bytes as usize);
-        eval!(&mut context, (output.0) + (output.1));
+        let output = blake2s(&mut context, &inputs, n_bytes as usize).0;
+        eval!(&mut context, (*output[0].raw()) + (*output[1].raw()));
+        eval!(&mut context, (*output[2].raw()) + (*output[3].raw()));
+        eval!(&mut context, (*output[4].raw()) + (*output[5].raw()));
+        eval!(&mut context, (*output[6].raw()) + (*output[7].raw()));
     }
 
     context
@@ -99,9 +103,9 @@ pub fn build_triple_xor_context() -> Context<QM31> {
 
     // Inputs are u32 values packed as (low_16, high_16, 0, 0).
     // 42 ^ 17 ^ 55 = 12
-    let a = U32Wrapper::from(42).guess(&mut context);
-    let b = U32Wrapper::from(17).guess(&mut context);
-    let c = U32Wrapper::from(55).guess(&mut context);
+    let a = QM31::pack_u32(42).guess(&mut context);
+    let b = QM31::pack_u32(17).guess(&mut context);
+    let c = QM31::pack_u32(55).guess(&mut context);
     let out = triple_xor(&mut context, a, b, c);
     expect![["
         U32((12 + 0i) + (0 + 0i)u)
@@ -109,9 +113,9 @@ pub fn build_triple_xor_context() -> Context<QM31> {
     .assert_debug_eq(&out.get_value(&context));
 
     // 0x10000 ^ 0x20000 ^ 0x30001 = 1
-    let a = U32Wrapper::from(0x10000).guess(&mut context);
-    let b = U32Wrapper::from(0x20000).guess(&mut context);
-    let c = U32Wrapper::from(0x30001).guess(&mut context);
+    let a = QM31::pack_u32(0x10000).guess(&mut context);
+    let b = QM31::pack_u32(0x20000).guess(&mut context);
+    let c = QM31::pack_u32(0x30001).guess(&mut context);
     let out = triple_xor(&mut context, a, b, c);
     expect![["
         U32((1 + 0i) + (0 + 0i)u)
@@ -119,9 +123,9 @@ pub fn build_triple_xor_context() -> Context<QM31> {
     .assert_debug_eq(&out.get_value(&context));
 
     // 0x30005 ^ 0x10007 ^ 0x4000b = 0x60009
-    let a = U32Wrapper::from(0x30005).guess(&mut context);
-    let b = U32Wrapper::from(0x10007).guess(&mut context);
-    let c = U32Wrapper::from(0x4000b).guess(&mut context);
+    let a = QM31::pack_u32(0x30005).guess(&mut context);
+    let b = QM31::pack_u32(0x10007).guess(&mut context);
+    let c = QM31::pack_u32(0x4000b).guess(&mut context);
     let out = triple_xor(&mut context, a, b, c);
     expect![["
         U32((9 + 6i) + (0 + 0i)u)
@@ -135,21 +139,21 @@ pub fn build_triple_xor_context() -> Context<QM31> {
 pub fn build_m31_to_u32_context() -> Context<QM31> {
     let mut context = Context::<QM31>::new(N_RESERVED);
 
-    let a = M31Wrapper::from_m31(42.into()).guess(&mut context);
+    let a = guess_m31_from_u32(&mut context, 42);
     let out_a = m31_to_u32(&mut context, a);
     expect![["
         U32((42 + 0i) + (0 + 0i)u)
     "]]
     .assert_debug_eq(&out_a.get_value(&context));
 
-    let b = M31Wrapper::from_m31(100_000.into()).guess(&mut context);
+    let b = guess_m31_from_u32(&mut context, 100_000);
     let out_b = m31_to_u32(&mut context, b);
     expect![["
         U32((34464 + 1i) + (0 + 0i)u)
     "]]
     .assert_debug_eq(&out_b.get_value(&context));
 
-    let c = M31Wrapper::from_m31(2_000_042.into()).guess(&mut context);
+    let c = guess_m31_from_u32(&mut context, 2_000_042);
     let out_c = m31_to_u32(&mut context, c);
     expect![["
         U32((33962 + 30i) + (0 + 0i)u)
@@ -166,12 +170,12 @@ pub fn build_blake_g_gate_context() -> Context<QM31> {
     // Inputs are u32 values packed as (low_16, high_16, 0, 0).
     // G(305419896, 4294967295, 2147483647, 123456789, 987654321, 468798)
     //   => (2827666065, 4146123195, 3407348176, 3638212488)
-    let a = U32Wrapper::from(305419896).guess(&mut context);
-    let b = U32Wrapper::from(4294967295).guess(&mut context);
-    let c = U32Wrapper::from(2147483647).guess(&mut context);
-    let d = U32Wrapper::from(123456789).guess(&mut context);
-    let f0 = U32Wrapper::from(987654321).guess(&mut context);
-    let f1 = U32Wrapper::from(468798).guess(&mut context);
+    let a = QM31::pack_u32(305419896).guess(&mut context);
+    let b = QM31::pack_u32(4294967295).guess(&mut context);
+    let c = QM31::pack_u32(2147483647).guess(&mut context);
+    let d = QM31::pack_u32(123456789).guess(&mut context);
+    let f0 = QM31::pack_u32(987654321).guess(&mut context);
+    let f1 = QM31::pack_u32(468798).guess(&mut context);
 
     let [out_a, out_b, out_c, out_d] = blake_g_gate(&mut context, a, b, c, d, f0, f1);
     expect![["
@@ -217,10 +221,10 @@ fn stwo_verify<MC: MerkleChannel>(
         &preprocessed_column_log_sizes,
     );
 
-    let log_blowup_factor = pcs_config.fri_config.log_blowup_factor;
+    let log_blowup_factor = pcs_config.fri_params.log_blowup_factor;
     let verifier_channel = &mut MC::C::default();
     verifier_channel.mix_felts(&[channel_salt.into()]);
-    pcs_config.fri_config.mix_into(verifier_channel);
+    pcs_config.fri_params.mix_into(verifier_channel);
     let commitment_scheme = &mut CommitmentSchemeVerifier::<MC>::new(pcs_config);
 
     let [trace_log_sizes, interaction_log_sizes] = column_log_sizes_per_tree(&log_sizes);
@@ -262,7 +266,7 @@ fn stwo_verify<MC: MerkleChannel>(
     )
     .unwrap();
 
-    assert_eq!(lookup_sum(&claim, &interaction_claim, &interaction_elements,), QM31::zero());
+    assert_eq!(logup_sum(&claim, &interaction_claim, &interaction_elements,), QM31::zero());
 }
 
 #[test]
@@ -294,7 +298,7 @@ fn test_prove_and_stark_verify_blake_gate_context() {
         default_circuit_pcs_config(preprocessed_circuit.trace_log_size()),
     )
     .unwrap();
-    stwo_verify::<Blake2sM31MerkleChannel>(circuit_proof, &preprocessed_circuit);
+    stwo_verify::<Blake2sMerkleChannel>(circuit_proof, &preprocessed_circuit);
 }
 
 #[test]
@@ -310,7 +314,7 @@ fn test_prove_and_stark_verify_permutation_context() {
         default_circuit_pcs_config(preprocessed_circuit.trace_log_size()),
     )
     .unwrap();
-    stwo_verify::<Blake2sM31MerkleChannel>(circuit_proof, &preprocessed_circuit);
+    stwo_verify::<Blake2sMerkleChannel>(circuit_proof, &preprocessed_circuit);
 }
 
 #[test]
@@ -326,7 +330,7 @@ fn test_prove_and_stark_verify_fibonacci_context() {
         default_circuit_pcs_config(preprocessed_circuit.trace_log_size()),
     )
     .unwrap();
-    stwo_verify::<Blake2sM31MerkleChannel>(circuit_proof, &preprocessed_circuit);
+    stwo_verify::<Blake2sMerkleChannel>(circuit_proof, &preprocessed_circuit);
 }
 
 #[test]
@@ -342,7 +346,7 @@ fn test_prove_and_stark_verify_triple_xor_context() {
         default_circuit_pcs_config(preprocessed_circuit.trace_log_size()),
     )
     .unwrap();
-    stwo_verify::<Blake2sM31MerkleChannel>(circuit_proof, &preprocessed_circuit);
+    stwo_verify::<Blake2sMerkleChannel>(circuit_proof, &preprocessed_circuit);
 }
 
 #[test]
@@ -358,7 +362,7 @@ fn test_prove_and_stark_verify_m31_to_u32_context() {
         default_circuit_pcs_config(preprocessed_circuit.trace_log_size()),
     )
     .unwrap();
-    stwo_verify::<Blake2sM31MerkleChannel>(circuit_proof, &preprocessed_circuit);
+    stwo_verify::<Blake2sMerkleChannel>(circuit_proof, &preprocessed_circuit);
 }
 
 #[test]
@@ -374,7 +378,7 @@ fn test_prove_and_stark_verify_blake_g_gate_context() {
         default_circuit_pcs_config(preprocessed_circuit.trace_log_size()),
     )
     .unwrap();
-    stwo_verify::<Blake2sM31MerkleChannel>(circuit_proof, &preprocessed_circuit);
+    stwo_verify::<Blake2sMerkleChannel>(circuit_proof, &preprocessed_circuit);
 }
 
 /// Verifies a [`CircuitProof`] using the circuit verifier. Requires the expected
@@ -415,7 +419,7 @@ fn test_prove_and_circuit_verify_triple_xor_context() {
 }
 
 /// Extract the preprocessed-trace Merkle root (`commitments[0]`) from a `CircuitProof` as
-/// `[u32; 8]`, matching the layout `ReducedHashValue<QM31>` consumes via `From<[u32; 8]>`.
+/// `[u32; 8]`.
 fn preprocessed_root_from_proof(circuit_proof: &CircuitProof<Blake2sMerkleHasher>) -> [u32; 8] {
     let hash: Blake2sHash = circuit_proof.stark_proof.proof.commitments[0];
     le_u32s_from_bytes(hash.0)

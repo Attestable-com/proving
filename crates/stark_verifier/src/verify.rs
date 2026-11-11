@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use circuits::context::{Context, Var};
 use circuits::eval;
-use circuits::extract_bits::extract_bits;
+use circuits::extract_bits::{combine_bits, extract_bits};
 use circuits::ivalue::IValue;
 use circuits::ops::eq;
 use circuits::simd::Simd;
@@ -15,11 +15,11 @@ use stwo_constraint_framework::{INTERACTION_TRACE_IDX, ORIGINAL_TRACE_IDX};
 
 use crate::channel::Channel;
 use crate::constraint_eval::compute_composition_polynomial;
-use crate::fri::{fri_commit, fri_decommit, mix_fri_config};
+use crate::fri::{fri_commit, fri_decommit, mix_fri_params};
 use crate::merkle::decommit_eval_domain_samples;
 use crate::oods::{collect_oods_responses, compute_fri_input, extract_expected_composition_eval};
 use crate::proof::{Proof, ProofConfig};
-use crate::select_queries::{get_query_selection_input_from_channel, select_queries};
+use crate::select_queries::{Queries, get_query_bits_from_channel, select_queries};
 use crate::statement::{EvaluateArgs, OodsSamples, Statement};
 
 /// Number of bits used to represent a component log-size in the packed claim format.
@@ -61,14 +61,14 @@ pub fn verify<Value: IValue>(
     // Mix the channel salt.
     channel.mix_qm31s(context, [proof.channel_salt]);
 
-    // Mix the FRI config.
-    mix_fri_config(context, &mut channel, &config.fri);
+    // Mix the FRI params.
+    mix_fri_params(context, &mut channel, &config.fri.params);
 
     // Mix the preprocessed root (known from the statement) into the channel.
     let preprocessed_root = statement.get_preprocessed_root(context);
     channel.mix_commitment(context, &preprocessed_root);
 
-    let component_log_sizes = statement.get_component_log_sizes().clone();
+    let component_log_sizes = statement.pack_component_log_sizes(context);
     let component_sizes = validate_and_compute_component_sizes(
         context,
         &component_log_sizes,
@@ -77,8 +77,7 @@ pub fn verify<Value: IValue>(
 
     // Check that the component sizes are at most 2^config.log_trace_size().
     // Note that we need k + 1 bits to represent 2^k.
-    let component_sizes_bits =
-        extract_bits(context, &component_sizes, config.log_trace_size() as u32 + 1);
+    let component_sizes_bits = extract_bits(context, &component_sizes, config.log_trace_size() + 1);
 
     for claim_to_mix in statement.claims_to_mix(context) {
         channel.mix_u32s(context, claim_to_mix.into_iter());
@@ -89,7 +88,8 @@ pub fn verify<Value: IValue>(
 
     channel.pow(context, config.n_interaction_pow_bits, proof.interaction_pow_nonce);
     // Pick the interaction elements.
-    let [interaction_z, interaction_alpha] = channel.draw_two_qm31s(context);
+    let interaction_z = channel.draw_qm31(context);
+    let interaction_alpha = channel.draw_qm31(context);
     context.debug_info.insert("interaction_z".into(), interaction_z);
     context.debug_info.insert("interaction_alpha".into(), interaction_alpha);
 
@@ -163,7 +163,7 @@ pub fn verify<Value: IValue>(
         context,
         &proof.composition_eval_at_oods,
         oods_point,
-        config.log_trace_size() + COMPOSITION_LOG_SPLIT as usize,
+        config.log_trace_size() + COMPOSITION_LOG_SPLIT,
     );
     eq(context, composition_eval, expected_composition_eval);
 
@@ -174,31 +174,29 @@ pub fn verify<Value: IValue>(
     let fri_alphas = fri_commit(context, &mut channel, &proof.fri.commit);
 
     // Proof of work before query selection.
-    channel.pow(context, config.fri.pow_bits, proof.pow_nonce);
+    channel.pow(context, config.fri.params.pow_bits, proof.fri.pow_nonce);
 
     // Select queries.
-    let query_selection_input =
-        get_query_selection_input_from_channel(context, &mut channel, config.n_queries());
-    let queries =
-        select_queries(context, &query_selection_input, config.log_evaluation_domain_size());
+    let bits = get_query_bits_from_channel(
+        context,
+        &mut channel,
+        config.n_queries(),
+        config.log_evaluation_domain_size(),
+    );
+    let points = select_queries(context, &bits);
+    let unpacked_bits = bits.iter().map(|simd| Simd::unpack(context, simd)).collect_vec();
+    let queries = Queries { bits, points };
 
     // Check decommitment of trace queries.
-    let bits = queries.bits.iter().map(|simd| Simd::unpack(context, simd)).collect_vec();
-
-    let opt_column_log_sizes_by_trace = get_opt_column_log_sizes_by_trace(
-        context,
-        config,
-        component_log_sizes,
-        statement.sorting_required(),
-    );
-
+    let opt_column_log_sizes_by_trace =
+        get_opt_column_log_sizes_by_trace(context, config, component_log_sizes);
     decommit_eval_domain_samples(
         context,
         config.n_queries(),
         &opt_column_log_sizes_by_trace,
         &proof.eval_domain_samples,
         &proof.eval_domain_auth_paths,
-        &bits,
+        &unpacked_bits,
         &{
             let [trace, interaction, composition] = proof.merkle_roots();
             [&preprocessed_root, trace, interaction, composition]
@@ -216,16 +214,7 @@ pub fn verify<Value: IValue>(
         oods_quotient_coef,
     );
 
-    fri_decommit(
-        context,
-        &proof.fri,
-        config.log_trace_size,
-        &config.fri,
-        fri_input,
-        &bits,
-        queries,
-        &fri_alphas,
-    );
+    fri_decommit(context, &proof.fri, &config.fri, fri_input, &unpacked_bits, queries, &fri_alphas);
 }
 
 /// Verify that no relation is used more than P times.
@@ -239,7 +228,7 @@ fn check_relation_uses<Value: IValue>(
     context: &mut Context<impl IValue>,
     statement: &impl Statement<Value>,
     component_sizes_bits: &[Simd],
-) -> HashMap<String, Var> {
+) -> HashMap<String, M31Wrapper<Var>> {
     let components = statement.get_components();
 
     // Check that sum(uses_per_row * (floor(num_rows / DIV) + 1)) cannot overflow even for the
@@ -247,7 +236,7 @@ fn check_relation_uses<Value: IValue>(
     // This is a sanity check that `RELATION_USES_NUM_ROWS_SHIFT` is large enough for the given
     // statement, it does not depend on the specific assignment.
     let mut max_shifted_uses_per_relation = HashMap::<&str, u64>::new();
-    for component in components.values() {
+    for component in &components {
         for relation_use in component.relation_uses_per_row() {
             let entry = max_shifted_uses_per_relation.entry(relation_use.relation_id).or_insert(0);
             *entry = entry
@@ -262,7 +251,7 @@ fn check_relation_uses<Value: IValue>(
     {
         Some(high_bits) => {
             let one = Simd::one(context, components.len());
-            let shifted_component_sizes = Simd::combine_bits(context, high_bits);
+            let shifted_component_sizes = combine_bits(context, high_bits);
             let res = eval!(context, (shifted_component_sizes) + (one));
             // A variable in the Simd vector might be unused in the case where all the corresponding
             // components don't use any relations.
@@ -274,14 +263,15 @@ fn check_relation_uses<Value: IValue>(
 
     // Sum uses_per_row * (floor(num_rows / DIV) + 1) for all relations
     let mut shifted_relation_uses = HashMap::new();
-    for (i, component) in components.values().enumerate() {
+    for (i, component) in components.iter().enumerate() {
         let relation_uses = component.relation_uses_per_row();
         if relation_uses.is_empty() {
             continue;
         }
         let shifted_size_p1 = Simd::unpack_idx(context, &shifted_component_sizes_p1, i);
         for relation_use in relation_uses {
-            let uses_per_row = context.constant(u32::try_from(relation_use.uses).unwrap().into());
+            let uses_per_row =
+                M31Wrapper::const_m31(context, u32::try_from(relation_use.uses).unwrap().into());
 
             let shifted_uses_upper_bound = eval!(context, (shifted_size_p1) * (uses_per_row));
 
@@ -296,11 +286,8 @@ fn check_relation_uses<Value: IValue>(
 
     // Verify that the sum is at most `floor(P / DIV) = 2^(31 - RELATION_USES_NUM_ROWS_SHIFT) - 1`
     // by expressing it as a `31 - RELATION_USES_NUM_ROWS_SHIFT`-bit number.
-    let shifted_use_counts = shifted_relation_uses
-        .iter()
-        .sorted_by_key(|(k, _v)| *k)
-        .map(|(_k, v)| M31Wrapper::new_unsafe(*v))
-        .collect_vec();
+    let shifted_use_counts =
+        shifted_relation_uses.iter().sorted_by_key(|(k, _v)| *k).map(|(_k, v)| *v).collect_vec();
     let shifted_use_counts = Simd::pack(context, &shifted_use_counts);
     // The range check below ensures that:
     // `shifted_use_counts <= 2^(31 - RELATION_USES_NUM_ROWS_SHIFT) - 1`
@@ -314,19 +301,12 @@ fn check_relation_uses<Value: IValue>(
 
 // Returns a map from trace index to the column log sizes used to sort that trace's query columns
 // into committed order. A trace index absent from the map needs no sorting (its columns are already
-// in committed order), so only the trace and interaction columns ever appear. When
-// `sorting_required` is false every trace is already in committed order and an empty map is
-// returned, skipping sorting entirely.
+// in committed order), so only the trace and interaction columns ever appear.
 fn get_opt_column_log_sizes_by_trace(
     context: &mut Context<impl IValue>,
     config: &ProofConfig,
     component_log_sizes: Simd,
-    sorting_required: bool,
 ) -> HashMap<usize, Vec<Var>> {
-    if !sorting_required {
-        return HashMap::new();
-    }
-
     let mut column_log_sizes = [
         Vec::with_capacity(config.n_trace_columns),
         Vec::with_capacity(config.n_interaction_columns),
@@ -345,7 +325,7 @@ fn get_opt_column_log_sizes_by_trace(
 fn validate_and_compute_component_sizes(
     context: &mut Context<impl IValue>,
     component_log_sizes: &Simd,
-    log_trace_size: usize,
+    log_trace_size: u32,
 ) -> Simd {
     const _: () = assert!(
         LOG_SIZE_BITS == 5,

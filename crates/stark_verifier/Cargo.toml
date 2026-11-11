@@ -3,6 +3,9 @@ name = "circuits-stark-verifier"
 version.workspace = true
 edition.workspace = true
 
+[features]
+test-utils = []
+
 [dependencies]
 indexmap = { workspace = true, features = ["serde", "std"] }
 hashbrown.workspace = true
@@ -16,6 +19,5 @@ circuits.workspace = true
 
 [dev-dependencies]
 circuits = { workspace = true, features = ["test-utils"] }
-indoc.workspace = true
 rstest.workspace = true
 expect-test.workspace = true

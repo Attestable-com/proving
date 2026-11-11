@@ -16,48 +16,13 @@ pub const LOG_SIZE: u32 = (ELEM_BITS - EXPAND_BITS) * 2; // = 20
 pub const N_MULT_COLUMNS: usize = 16; // = 1 << (EXPAND_BITS * 2)
 pub const N_TRACE_COLUMNS: usize = N_MULT_COLUMNS;
 pub const N_INTERACTION_COLUMNS: usize = 32;
+/// The table only yields into relations, so it uses none.
+pub const RELATION_USES_PER_ROW: [(felt252, u32); 0] = [];
 
 /// `1 << LIMB_BITS = 1024`. Used as the offset shift between expansion bands.
 const LIMB_OFFSET: u32 = 1024;
 
-#[derive(Drop, Serde, Copy)]
-pub struct Claim {}
-
-pub impl ClaimImpl of ClaimTrait<Claim> {
-    fn log_sizes(self: @Claim) -> TreeArray<Span<u32>> {
-        let log_size = LOG_SIZE;
-        let preprocessed_log_sizes = array![log_size].span();
-        let trace_log_sizes = [log_size; N_TRACE_COLUMNS].span();
-        // 8 pairs × QM31 (4 base columns each) = 32 interaction columns.
-        let interaction_log_sizes = [log_size; N_INTERACTION_COLUMNS].span();
-        array![preprocessed_log_sizes, trace_log_sizes, interaction_log_sizes]
-    }
-
-    fn mix_into(self: @Claim, ref channel: Channel) {}
-
-    fn accumulate_relation_uses(self: @Claim, ref relation_uses: RelationUsesDict) {}
-}
-
-#[derive(Drop)]
-pub struct Component {
-    pub claim: Claim,
-    pub claimed_sum: QM31,
-    pub common_lookup_elements: CommonLookupElements,
-}
-
-pub impl NewComponentImpl of NewComponent<Component> {
-    type Claim = Claim;
-
-    fn new(
-        claim: @Claim, claimed_sum: QM31, common_lookup_elements: @CommonLookupElements,
-    ) -> Component {
-        Component {
-            claim: *claim, claimed_sum, common_lookup_elements: common_lookup_elements.clone(),
-        }
-    }
-}
-
-pub impl AirComponentImpl of AirComponent<Component> {
+pub impl AirComponentImpl of AirComponent {
     fn evaluate_constraints_at_point(
         self: @Component,
         ref sum: QM31,
@@ -65,16 +30,16 @@ pub impl AirComponentImpl of AirComponent<Component> {
         ref trace_mask_values: ColumnSpan<Span<QM31>>,
         ref interaction_trace_mask_values: ColumnSpan<Span<QM31>>,
         random_coeff: QM31,
-        public_params: Span<u32>,
+        common_lookup_elements: @CommonLookupElements,
     ) {
         let log_size = LOG_SIZE;
         let claimed_sum = *self.claimed_sum;
         let column_size = m31(pow2(log_size));
 
         // Preprocessed 10-bit XOR table columns.
-        let bitwise_xor_10_0 = preprocessed_mask_values.get_and_mark_used(BITWISE_XOR_10_0_IDX);
-        let bitwise_xor_10_1 = preprocessed_mask_values.get_and_mark_used(BITWISE_XOR_10_1_IDX);
-        let bitwise_xor_10_2 = preprocessed_mask_values.get_and_mark_used(BITWISE_XOR_10_2_IDX);
+        let bitwise_xor_10_0 = preprocessed_mask_values.get(BITWISE_XOR_10_0_IDX);
+        let bitwise_xor_10_1 = preprocessed_mask_values.get(BITWISE_XOR_10_1_IDX);
+        let bitwise_xor_10_2 = preprocessed_mask_values.get(BITWISE_XOR_10_2_IDX);
 
         // 16 multiplicity columns, one per (i, j) ∈ {0..4}².
         let [
@@ -126,42 +91,38 @@ pub impl AirComponentImpl of AirComponent<Component> {
         let limb_off_3: QM31 = m31(LIMB_OFFSET * 3).into();
 
         // Precompute the 4 a-side values (one per `i`) and 4 b-side values (one per `j`).
-        let a_offs = [
+        let [a0, a1, a2, a3] = [
             bitwise_xor_10_0, bitwise_xor_10_0 + limb_off, bitwise_xor_10_0 + limb_off_2,
             bitwise_xor_10_0 + limb_off_3,
         ];
-        let b_offs = [
+        let [b0, b1, b2, b3] = [
             bitwise_xor_10_1, bitwise_xor_10_1 + limb_off, bitwise_xor_10_1 + limb_off_2,
             bitwise_xor_10_1 + limb_off_3,
         ];
         // c offsets — XOR of i and j folded in.
-        let c_offs = [
+        let [c0, c1, c2, c3] = [
             bitwise_xor_10_2, bitwise_xor_10_2 + limb_off, bitwise_xor_10_2 + limb_off_2,
             bitwise_xor_10_2 + limb_off_3,
         ];
 
-        // Build sum_n = combine(relation_id, a_offs[i], b_offs[j], c_offs[i^j]) for each
-        // lookup n = 4*i + j.
-        let common = self.common_lookup_elements;
-        let [a0, a1, a2, a3] = a_offs;
-        let [b0, b1, b2, b3] = b_offs;
-        let [c0, c1, c2, c3] = c_offs;
-        let sum_0 = common.combine_qm31([relation_id, a0, b0, c0].span());
-        let sum_1 = common.combine_qm31([relation_id, a0, b1, c1].span());
-        let sum_2 = common.combine_qm31([relation_id, a0, b2, c2].span());
-        let sum_3 = common.combine_qm31([relation_id, a0, b3, c3].span());
-        let sum_4 = common.combine_qm31([relation_id, a1, b0, c1].span());
-        let sum_5 = common.combine_qm31([relation_id, a1, b1, c0].span());
-        let sum_6 = common.combine_qm31([relation_id, a1, b2, c3].span());
-        let sum_7 = common.combine_qm31([relation_id, a1, b3, c2].span());
-        let sum_8 = common.combine_qm31([relation_id, a2, b0, c2].span());
-        let sum_9 = common.combine_qm31([relation_id, a2, b1, c3].span());
-        let sum_10 = common.combine_qm31([relation_id, a2, b2, c0].span());
-        let sum_11 = common.combine_qm31([relation_id, a2, b3, c1].span());
-        let sum_12 = common.combine_qm31([relation_id, a3, b0, c3].span());
-        let sum_13 = common.combine_qm31([relation_id, a3, b1, c2].span());
-        let sum_14 = common.combine_qm31([relation_id, a3, b2, c1].span());
-        let sum_15 = common.combine_qm31([relation_id, a3, b3, c0].span());
+        // Build sum_n = combine(relation_id, a_i, b_j, c_{i^j} for each lookup n = 4*i + j.
+        let common = common_lookup_elements;
+        let sum_0 = common.combine([relation_id, a0, b0, c0].span());
+        let sum_1 = common.combine([relation_id, a0, b1, c1].span());
+        let sum_2 = common.combine([relation_id, a0, b2, c2].span());
+        let sum_3 = common.combine([relation_id, a0, b3, c3].span());
+        let sum_4 = common.combine([relation_id, a1, b0, c1].span());
+        let sum_5 = common.combine([relation_id, a1, b1, c0].span());
+        let sum_6 = common.combine([relation_id, a1, b2, c3].span());
+        let sum_7 = common.combine([relation_id, a1, b3, c2].span());
+        let sum_8 = common.combine([relation_id, a2, b0, c2].span());
+        let sum_9 = common.combine([relation_id, a2, b1, c3].span());
+        let sum_10 = common.combine([relation_id, a2, b2, c0].span());
+        let sum_11 = common.combine([relation_id, a2, b3, c1].span());
+        let sum_12 = common.combine([relation_id, a3, b0, c3].span());
+        let sum_13 = common.combine([relation_id, a3, b1, c2].span());
+        let sum_14 = common.combine([relation_id, a3, b2, c1].span());
+        let sum_15 = common.combine([relation_id, a3, b3, c0].span());
 
         lookup_constraints(
             ref sum,
@@ -375,4 +336,98 @@ fn lookup_constraints(
         + (sum_14 * num_15)
         + (sum_15 * num_14);
     sum = sum * random_coeff + q;
+}
+
+#[cfg(test)]
+mod tests {
+    use core::num::traits::Zero;
+    use stwo_constraint_framework::test_utils::{make_interaction_trace, new_preprocessed_mask};
+    use stwo_constraint_framework::{AirComponent, CommonLookupElements, Component};
+    use stwo_verifier_core::fields::m31::M31;
+    use stwo_verifier_core::fields::qm31::{QM31, QM31Trait, qm31_const};
+    use crate::preprocessed_columns::{
+        BITWISE_XOR_10_0_IDX, BITWISE_XOR_10_1_IDX, BITWISE_XOR_10_2_IDX, NUM_PREPROCESSED_COLUMNS,
+    };
+    use super::AirComponentImpl;
+
+    /// The evaluation result of `verify_bitwise_xor_12_point_evaluation` in
+    /// `crates/circuit_prover/src/circuit_air/components/verify_bitwise_xor_12.rs`.
+    const VERIFY_BITWISE_XOR_12_EVAL_RESULT: [M31; 4] = [
+        M31 { inner: 1192162821 }, M31 { inner: 798775654 }, M31 { inner: 402281409 },
+        M31 { inner: 1482006777 },
+    ];
+
+    /// Checks this hand-written component against the prover's hand-written Rust component: the
+    /// inputs and the result are taken from `verify_bitwise_xor_12_point_evaluation` in
+    /// `crates/circuit_prover/src/circuit_air/components/verify_bitwise_xor_12.rs`. Keep the two
+    /// tests in sync.
+    #[test]
+    fn test_evaluation_matches_rust() {
+        let component = Component {
+            log_size: super::LOG_SIZE,
+            claimed_sum: qm31_const::<780228864, 797287743, 1098116836, 1231001529>(),
+        };
+        let mut sum: QM31 = Zero::zero();
+
+        let mut preprocessed_trace = new_preprocessed_mask(
+            array![
+                (
+                    BITWISE_XOR_10_0_IDX,
+                    qm31_const::<1019132783, 577662261, 1411911446, 1136299686>(),
+                ),
+                (BITWISE_XOR_10_1_IDX, qm31_const::<1431105596, 751158381, 306231922, 819567871>()),
+                (BITWISE_XOR_10_2_IDX, qm31_const::<23322617, 2140229949, 804779144, 1036244209>()),
+            ]
+                .span(),
+            NUM_PREPROCESSED_COLUMNS,
+        );
+
+        let mut trace_columns = [
+            [qm31_const::<588513901, 1381709766, 1740209196, 988311219>()].span(),
+            [qm31_const::<1483036430, 1856165774, 1291619160, 488862552>()].span(),
+            [qm31_const::<1198704003, 3577443, 1420176220, 1340529904>()].span(),
+            [qm31_const::<312035360, 2100325867, 945010468, 789533884>()].span(),
+            [qm31_const::<348466428, 729457621, 1945562163, 451511994>()].span(),
+            [qm31_const::<126324276, 1237411384, 1758402834, 428709849>()].span(),
+            [qm31_const::<160222960, 1102775500, 1475204238, 1759325703>()].span(),
+            [qm31_const::<723701119, 1463373183, 868902551, 1713425711>()].span(),
+            [qm31_const::<1809047471, 187583509, 39952429, 1973337145>()].span(),
+            [qm31_const::<130534135, 1760192857, 1965019790, 1421731346>()].span(),
+            [qm31_const::<1092910081, 479412797, 195373735, 2124831833>()].span(),
+            [qm31_const::<2119854101, 910123658, 2033050727, 952931272>()].span(),
+            [qm31_const::<241651259, 1419195850, 908829278, 2085896844>()].span(),
+            [qm31_const::<290059540, 1158547345, 671176026, 1894142936>()].span(),
+            [qm31_const::<1334557888, 1198650582, 351165390, 2096275069>()].span(),
+            [qm31_const::<1496440658, 1901757808, 110280401, 1192176288>()].span(),
+        ]
+            .span();
+        let interaction_values = array![
+            qm31_const::<367679456, 1089306077, 1751697368, 179535632>(),
+            qm31_const::<860107359, 1304465315, 899452500, 1434838909>(),
+            qm31_const::<1279837932, 1008437098, 1023852013, 1308454055>(),
+            qm31_const::<825882243, 1162108979, 65486191, 1375952774>(),
+            qm31_const::<1559776274, 177519278, 2077602132, 412029966>(),
+            qm31_const::<2096596382, 1690725615, 1425061651, 561703855>(),
+            qm31_const::<765245467, 2020970709, 779812626, 1860003928>(),
+            qm31_const::<1482009533, 828057215, 1446916125, 665510814>(),
+        ];
+        let mut interaction_columns = make_interaction_trace(
+            interaction_values, qm31_const::<244453227, 541976962, 504599444, 719906632>(),
+        );
+        component
+            .evaluate_constraints_at_point(
+                ref sum,
+                ref preprocessed_trace,
+                ref trace_columns,
+                ref interaction_columns,
+                qm31_const::<1739691684, 1643001086, 1073767856, 385276755>(),
+                // `CommonLookupElements::dummy()` in Rust.
+                @CommonLookupElements {
+                    z: qm31_const::<1, 2, 3, 4>(), alpha: qm31_const::<4, 3, 2, 1>(),
+                },
+            );
+        assert!(trace_columns.is_empty());
+        assert!(interaction_columns.is_empty());
+        assert_eq!(sum, QM31Trait::from_fixed_array(VERIFY_BITWISE_XOR_12_EVAL_RESULT));
+    }
 }

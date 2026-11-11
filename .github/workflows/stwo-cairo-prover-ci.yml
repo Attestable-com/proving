@@ -13,11 +13,11 @@ on:
 
 env:
   STABLE_VERSION: "1.94.0"
-  NIGHTLY_VERSION: "nightly-2026-01-15"
+  NIGHTLY_VERSION: "nightly-2026-07-06"
 
 jobs:
   tests:
-    runs-on: namespace-profile-starkware-libs-proving-dev-xlarge-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_XLARGE || 'ubuntu-24.04' }}
     env:
       RUST_MIN_STACK: 4194304
       RUSTFLAGS: -C target-cpu=native
@@ -26,6 +26,8 @@ jobs:
       RUST_BACKTRACE: full
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - id: prep
+        uses: ./.github/actions/hosted-runner-prep
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential
       - name: Install Rust toolchain
@@ -38,13 +40,16 @@ jobs:
           tool: nextest
       - name: Fetch cache
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # Built with `-C target-cpu=native`: never reuse a cache from another CPU model.
+          key: ${{ steps.prep.outputs.cpu-key }}
       - run: |
           cargo nextest run ${{ inputs.crate_group }} -P ci
 
   slow-tests:
     # TODO(Leo): consider running it also on PRs if cheap enough.
     if: ${{ github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
-    runs-on: namespace-profile-starkware-libs-proving-dev-xlarge-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_XLARGE || 'ubuntu-24.04' }}
     strategy:
       # A failing shard must not cancel its siblings.
       fail-fast: false
@@ -59,6 +64,8 @@ jobs:
       RUST_BACKTRACE: full
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - id: prep
+        uses: ./.github/actions/hosted-runner-prep
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential
       - name: Install Rust toolchain
@@ -73,8 +80,9 @@ jobs:
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           # All shards build exactly the same artifacts, so they must share one cache
-          # entry instead of getting a per-shard key.
-          shared-key: slow-tests
+          # entry instead of getting a per-shard key. The CPU key keeps `-C target-cpu=native`
+          # builds from another CPU model out.
+          shared-key: slow-tests-${{ steps.prep.outputs.cpu-key }}
           # Only one shard should write the cache back.
           save-if: ${{ matrix.shard == 1 }}
       - run: |
@@ -86,7 +94,7 @@ jobs:
             -P ci
 
   cairo-prover-wasm:
-    runs-on: namespace-profile-starkware-libs-proving-dev-small-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_SMALL || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
@@ -99,7 +107,7 @@ jobs:
         run: RUSTFLAGS='--cfg getrandom_backend="custom"' cargo check --target wasm64-unknown-unknown -Z build-std=std,panic_abort -p stwo-cairo-prover --release
 
   cairo-air-wasm:
-    runs-on: namespace-profile-starkware-libs-proving-dev-small-ubuntu-24-04-amd64
+    runs-on: ${{ vars.RUNNER_SMALL || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master

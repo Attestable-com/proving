@@ -28,6 +28,8 @@ impl CircuitSerialize for Proof<QM31> {
             pow_nonce,
             interaction_pow_nonce,
             batching_pow_nonce,
+            oods_pow_nonce,
+            fold_pow_nonces,
             fri,
         } = self;
 
@@ -46,6 +48,12 @@ impl CircuitSerialize for Proof<QM31> {
         interaction_pow_nonce.serialize(output);
         // Present exactly when the config has the grind; the deserializer reads it from there.
         if let Some(nonce) = batching_pow_nonce {
+            nonce.serialize(output);
+        }
+        if let Some(nonce) = oods_pow_nonce {
+            nonce.serialize(output);
+        }
+        for nonce in fold_pow_nonces {
             nonce.serialize(output);
         }
         fri.serialize(output);

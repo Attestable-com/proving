@@ -14,7 +14,7 @@ use stwo_constraint_framework::{INTERACTION_TRACE_IDX, ORIGINAL_TRACE_IDX};
 
 use crate::channel::Channel;
 use crate::constraint_eval::compute_composition_polynomial;
-use crate::fri::{fri_commit, fri_decommit};
+use crate::fri::{fri_commit_with_pow, fri_decommit};
 use crate::merkle::decommit_eval_domain_samples;
 use crate::oods::{collect_oods_responses, compute_fri_input, extract_expected_composition_eval};
 use crate::proof::{Proof, ProofConfig};
@@ -104,6 +104,14 @@ pub fn verify<Value: IValue>(
 
     channel.mix_commitment(context, &proof.composition_polynomial_root);
 
+    // The proof of work before the OODS point, when the configuration has one: the nonce is
+    // checked against the digest that holds the composition root, then mixed, so every fresh
+    // point costs a fresh grind.
+    if let Some(n_bits) = config.n_oods_pow_bits {
+        let nonce = proof.oods_pow_nonce.expect("validated by `validate_structure`");
+        channel.pow(context, n_bits, nonce);
+    }
+
     // Draw a random point for the OODS.
     let oods_point = channel.draw_point(context);
 
@@ -175,7 +183,13 @@ pub fn verify<Value: IValue>(
     let oods_quotient_coef = channel.draw_qm31(context);
 
     // Run the commit phase of FRI.
-    let fri_alphas = fri_commit(context, &mut channel, &proof.fri.commit);
+    let fri_alphas = fri_commit_with_pow(
+        context,
+        &mut channel,
+        &proof.fri.commit,
+        config.n_fold_pow_bits,
+        &proof.fold_pow_nonces,
+    );
 
     // Proof of work before query selection.
     channel.pow(context, config.fri.pow_bits, proof.pow_nonce);

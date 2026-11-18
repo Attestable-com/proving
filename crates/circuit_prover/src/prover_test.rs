@@ -6,13 +6,17 @@ use circuit_verifier::circuit_claim::{
 use circuit_verifier::statement::{
     INTERACTION_POW_BITS, all_circuit_components, circuit_component_log_sizes,
 };
-use circuit_verifier::verify::{CircuitConfig, verify_circuit, verify_circuit_with_batching_pow};
+use circuit_verifier::verify::{
+    CircuitConfig, verify_circuit, verify_circuit_with_batching_pow, verify_circuit_with_inner_pows,
+};
 use circuits::blake::{blake_g_gate, blake2s_m31, m31_to_u32, triple_xor};
 use circuits::context::{Context, Var};
 use circuits::eval;
 use circuits::ivalue::{IValue, NoValue, qm31_from_u32s};
 use circuits::ops::{guess, permute};
 use circuits::utils::le_u32s_from_bytes;
+use circuits_stark_verifier::proof::InnerPowBits;
+use circuits_stark_verifier::proof_from_stark_proof::nonce_value;
 use expect_test::expect;
 use num_traits::{One, Zero};
 use stwo::core::channel::{Channel, MerkleChannel};
@@ -23,13 +27,15 @@ use stwo::core::vcs_lifted::blake2_merkle::{Blake2sM31MerkleChannel, Blake2sMerk
 use stwo::core::vcs_lifted::poseidon252_merkle::Poseidon252MerkleChannel;
 use stwo::prover::backend::BackendForChannel;
 
-use crate::batching_grind::{BatchingGrindChannel, BatchingGrindMerkleChannel, Fired};
+use crate::batching_grind::{
+    BatchingGrindChannel, BatchingGrindMerkleChannel, GrindBits, GrindNonces,
+};
 use crate::circuit_air::circuit_components::CircuitComponents;
 use crate::circuit_hash::compute_circuit_hash;
 use crate::prover::{
     BaseColumnPool, CircuitProof, SimdBackend, prepare_circuit_proof_for_circuit_verifier,
     prove_circuit_assignment, prove_circuit_assignment_with_batching_pow,
-    prove_circuit_assignment_with_channel,
+    prove_circuit_assignment_with_channel, prove_circuit_assignment_with_grinds,
 };
 use crate::test_utils::default_circuit_pcs_config;
 // Not a power of 2 so that we can test component padding.
@@ -204,13 +210,27 @@ fn stwo_verify_with_batching_pow<MC: MerkleChannel>(
 where
     SimdBackend: BackendForChannel<MC>,
 {
+    let bits = GrindBits { batching: batching_pow_bits, ..GrindBits::default() };
+    stwo_verify_with_grinds::<MC>(circuit_proof, preprocessed_circuit, bits)
+}
+
+fn stwo_verify_with_grinds<MC: MerkleChannel>(
+    circuit_proof: CircuitProof<MC::H>,
+    preprocessed_circuit: &PreprocessedCircuit,
+    bits: GrindBits,
+) -> Result<(), String>
+where
+    SimdBackend: BackendForChannel<MC>,
+{
     let CircuitProof {
         claim,
         interaction_claim,
         pcs_config,
         stark_proof: proof,
         interaction_pow_nonce,
+        oods_pow_nonce,
         batching_pow_nonce,
+        fold_pow_nonces,
         channel_salt,
         circuit_hash: _,
     } = circuit_proof;
@@ -260,11 +280,17 @@ where
         &log_sizes,
         &preprocessed_circuit.preprocessed_trace.ids(),
     );
-    match (batching_pow_bits, batching_pow_nonce) {
-        (Some(bits), Some(nonce)) => verifier_channel.arm(bits, Some(nonce)),
-        (None, None) => {}
-        _ => return Err("the batching nonce does not match the verifier's configuration".into()),
+    if bits.batching.is_some() != batching_pow_nonce.is_some() {
+        return Err("the batching nonce does not match the verifier's configuration".into());
     }
+    verifier_channel.arm_grinds(
+        bits,
+        Some(GrindNonces {
+            oods: oods_pow_nonce,
+            batching: batching_pow_nonce,
+            folds: fold_pow_nonces,
+        }),
+    );
     let verdict = stwo::core::verifier::verify_ex(
         &components.components(),
         verifier_channel,
@@ -272,7 +298,7 @@ where
         proof.proof,
         true,
     );
-    if batching_pow_bits.is_some() && verifier_channel.disarm()? != Fired::Checked {
+    if !verifier_channel.disarm_grinds()?.ok {
         return Err("the grind before the batching coefficient fails".into());
     }
     verdict.map_err(|e| e.to_string())?;
@@ -561,8 +587,7 @@ fn circuit_verify_with_batching_pow(
     };
     let (mut proof, public_data) = prepare_circuit_proof_for_circuit_verifier(circuit_proof);
     if let Some(nonce) = nonce {
-        proof.batching_pow_nonce =
-            nonce.map(circuits_stark_verifier::proof_from_stark_proof::nonce_value);
+        proof.batching_pow_nonce = nonce.map(nonce_value);
     }
     verify_circuit_with_batching_pow(circuit_config, batching_pow_bits, proof, public_data)
         .map(|_| ())
@@ -656,4 +681,116 @@ fn test_missing_batching_grind_is_refused() {
         circuit_verify_with_batching_pow(proof, &preprocessed, Some(BATCHING_POW_BITS), Some(None))
     }));
     assert!(missing.is_err());
+}
+
+/// Bits of the grinds before the OODS point and the folding coefficients in the tests below.
+const GRINDS: GrindBits =
+    GrindBits { oods: Some(5), batching: Some(BATCHING_POW_BITS), fold: Some(7) };
+
+fn inner_pows(bits: GrindBits) -> InnerPowBits {
+    InnerPowBits { oods: bits.oods, batching: bits.batching, fold: bits.fold }
+}
+
+fn fibonacci_proof_with_grinds(
+    bits: GrindBits,
+) -> (CircuitProof<Blake2sMerkleHasher>, PreprocessedCircuit) {
+    let mut fibonacci_context = build_fibonacci_context().finalize(false);
+    fibonacci_context.validate_circuit();
+    let preprocessed_circuit = PreprocessedCircuit::preprocess_circuit(&mut fibonacci_context);
+    let proof = prove_circuit_assignment_with_grinds(
+        fibonacci_context.values(),
+        &preprocessed_circuit,
+        &BaseColumnPool::<SimdBackend>::new(),
+        default_circuit_pcs_config(preprocessed_circuit.trace_log_size),
+        bits,
+    )
+    .unwrap();
+    (proof, preprocessed_circuit)
+}
+
+/// The circuit verifier (with values) demanding `bits` over a proof.
+fn circuit_verify_with_grinds(
+    circuit_proof: CircuitProof<Blake2sMerkleHasher>,
+    preprocessed_circuit: &PreprocessedCircuit,
+    bits: GrindBits,
+) -> Result<(), String> {
+    let preprocessed_root = preprocessed_root_from_proof(&circuit_proof);
+    let circuit_config = CircuitConfig {
+        config: circuit_proof.pcs_config,
+        n_outputs: preprocessed_circuit.n_outputs,
+        preprocessed_column_log_sizes: preprocessed_circuit.preprocessed_trace.log_sizes(),
+        preprocessed_root: preprocessed_root.into(),
+    };
+    let (proof, public_data) = prepare_circuit_proof_for_circuit_verifier(circuit_proof);
+    verify_circuit_with_inner_pows(circuit_config, inner_pows(bits), proof, public_data).map(|_| ())
+}
+
+#[test]
+fn test_prove_and_verify_with_every_grind() {
+    let (proof, preprocessed) = fibonacci_proof_with_grinds(GRINDS);
+    assert!(proof.oods_pow_nonce.is_some() && proof.batching_pow_nonce.is_some());
+    assert!(!proof.fold_pow_nonces.is_empty());
+    stwo_verify_with_grinds::<Blake2sM31MerkleChannel>(proof, &preprocessed, GRINDS).unwrap();
+    let (proof, preprocessed) = fibonacci_proof_with_grinds(GRINDS);
+    circuit_verify_with_grinds(proof, &preprocessed, GRINDS).unwrap();
+    // Each grind alone.
+    for bits in [
+        GrindBits { oods: GRINDS.oods, ..GrindBits::default() },
+        GrindBits { fold: GRINDS.fold, ..GrindBits::default() },
+    ] {
+        let (proof, preprocessed) = fibonacci_proof_with_grinds(bits);
+        stwo_verify_with_grinds::<Blake2sM31MerkleChannel>(proof, &preprocessed, bits).unwrap();
+        let (proof, preprocessed) = fibonacci_proof_with_grinds(bits);
+        circuit_verify_with_grinds(proof, &preprocessed, bits).unwrap();
+    }
+}
+
+/// A proof made under `made`, changed by `forge`, is refused by both verifiers demanding
+/// `demanded` (the prover is deterministic, so each verifier gets its own copy).
+fn refused(
+    made: GrindBits,
+    demanded: GrindBits,
+    forge: impl Fn(&mut CircuitProof<Blake2sMerkleHasher>),
+) {
+    let (mut proof, preprocessed) = fibonacci_proof_with_grinds(made);
+    forge(&mut proof);
+    assert!(
+        stwo_verify_with_grinds::<Blake2sM31MerkleChannel>(proof, &preprocessed, demanded).is_err()
+    );
+    let (mut proof, preprocessed) = fibonacci_proof_with_grinds(made);
+    forge(&mut proof);
+    // The circuit refuses by an unsatisfied gate, or by the proof's shape (a panic of
+    // `validate_structure`) where a nonce is missing or left over.
+    let verdict = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        circuit_verify_with_grinds(proof, &preprocessed, demanded)
+    }));
+    assert!(!matches!(verdict, Ok(Ok(()))));
+}
+
+#[test]
+fn test_wrong_oods_and_fold_nonces_are_refused() {
+    let layers = fibonacci_proof_with_grinds(GRINDS).0.fold_pow_nonces.len();
+    // A changed nonce at each new point: it passes the check with probability `2^-bits`, and the
+    // fixture is deterministic.
+    refused(GRINDS, GRINDS, |proof| *proof.oods_pow_nonce.as_mut().unwrap() += 1);
+    for layer in 0..layers {
+        refused(GRINDS, GRINDS, |proof| proof.fold_pow_nonces[layer] += 1);
+    }
+    // A missing nonce, and a fold nonce short.
+    refused(GRINDS, GRINDS, |proof| proof.oods_pow_nonce = None);
+    refused(GRINDS, GRINDS, |proof| {
+        proof.fold_pow_nonces.pop();
+    });
+    // A verifier demanding more bits than were ground, at each point.
+    refused(GRINDS, GrindBits { oods: Some(20), ..GRINDS }, |_| {});
+    refused(GRINDS, GrindBits { fold: Some(20), ..GRINDS }, |_| {});
+    // A verifier without the grinds refuses a proof made with them (its transcript has no
+    // nonce), and a verifier with them a proof made without, bare or given nonces.
+    let batching = GrindBits::batching(BATCHING_POW_BITS);
+    refused(GRINDS, batching, |_| {});
+    refused(batching, GRINDS, |_| {});
+    refused(batching, GRINDS, |proof| {
+        proof.oods_pow_nonce = Some(0);
+        proof.fold_pow_nonces = vec![0; layers];
+    });
 }

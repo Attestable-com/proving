@@ -32,7 +32,8 @@ pub struct ProofInfo {
     pub n_queries: usize,
     pub n_columns_per_trace: [usize; N_TRACES],
     // Fixed scalars: channel_salt (QM31) + 3 roots (HashValue, 32 bytes each) + pow_nonce (QM31) +
-    // interaction_pow_nonce (QM31) + batching_pow_nonce (QM31, when the config has the grind).
+    // interaction_pow_nonce (QM31) + the nonces of the grinds the config has (QM31 each:
+    // batching_pow_nonce, oods_pow_nonce, one fold nonce per FRI layer).
     pub fixed: usize,
     // Claim (serialized in packed format): enable bits + log sizes + claimed sums.
     pub claim: usize,
@@ -60,7 +61,9 @@ impl ProofInfo {
         let n_queries = config.fri.n_queries;
         let log_eval_domain = config.log_evaluation_domain_size();
 
-        let n_batching_nonces = usize::from(config.n_batching_pow_bits.is_some());
+        let n_batching_nonces = usize::from(config.n_batching_pow_bits.is_some())
+            + usize::from(config.n_oods_pow_bits.is_some())
+            + config.n_fold_pow_nonces();
         let fixed =
             (1 + 3 * 2 + 1 + 1 + n_batching_nonces) * SECURE_EXTENSION_DEGREE * N_U8S_PER_U32;
 
@@ -231,6 +234,12 @@ pub struct ProofConfig {
     /// mixed into the channel: it is the verifier's own configuration, and a proof made under
     /// other bits fails the check or diverges from the transcript.
     pub n_batching_pow_bits: Option<u32>,
+    /// Bits of the proof of work between the composition root and the OODS point, or `None` for
+    /// a proof without it. The verifier's own configuration, as `n_batching_pow_bits`.
+    pub n_oods_pow_bits: Option<u32>,
+    /// Bits of the proof of work between every FRI layer's root and its folding coefficient, or
+    /// `None` for a proof without them. The verifier's own configuration.
+    pub n_fold_pow_bits: Option<u32>,
 
     // AIR structure.
     pub n_preprocessed_columns: usize,
@@ -254,7 +263,24 @@ pub struct ProofConfig {
 
     pub fri: FriConfig,
 }
+/// The bits of the proofs of work inside the STARK proof that a verifier demands
+/// ([`ProofConfig::n_oods_pow_bits`], [`ProofConfig::n_batching_pow_bits`],
+/// [`ProofConfig::n_fold_pow_bits`]); `None` is the protocol without that one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct InnerPowBits {
+    pub oods: Option<u32>,
+    pub batching: Option<u32>,
+    pub fold: Option<u32>,
+}
+
 impl ProofConfig {
+    /// Sets the proofs of work inside the STARK proof.
+    pub fn set_inner_pow_bits(&mut self, bits: InnerPowBits) {
+        self.n_oods_pow_bits = bits.oods;
+        self.n_batching_pow_bits = bits.batching;
+        self.n_fold_pow_bits = bits.fold;
+    }
+
     pub fn new<Value: IValue>(
         components: &IndexMap<&'static str, Box<dyn CircuitEval<Value>>>,
         n_preprocessed_columns: usize,
@@ -304,6 +330,8 @@ impl ProofConfig {
         Self {
             n_interaction_pow_bits,
             n_batching_pow_bits: None,
+            n_oods_pow_bits: None,
+            n_fold_pow_bits: None,
             n_preprocessed_columns,
             n_trace_columns,
             n_interaction_columns,
@@ -317,6 +345,21 @@ impl ProofConfig {
     /// Returns the number of active components in the AIR.
     pub fn n_components(&self) -> usize {
         self.component_shapes.len()
+    }
+
+    /// The FRI layers, each with a folding coefficient.
+    pub fn n_fri_layers(&self) -> usize {
+        compute_all_fold_steps(
+            self.log_trace_size - self.fri.log_last_layer_degree_bound as usize,
+            self.fri.fold_step as usize,
+        )
+        .len()
+    }
+
+    /// The nonces of the grinds before the folding coefficients: one per FRI layer when
+    /// [`Self::n_fold_pow_bits`] is present, none otherwise.
+    pub fn n_fold_pow_nonces(&self) -> usize {
+        if self.n_fold_pow_bits.is_some() { self.n_fri_layers() } else { 0 }
     }
 
     /// Returns the log2 of the size of the trace.
@@ -413,6 +456,10 @@ pub struct Proof<T> {
     pub interaction_pow_nonce: T,
     /// Present exactly when [`ProofConfig::n_batching_pow_bits`] is.
     pub batching_pow_nonce: Option<T>,
+    /// Present exactly when [`ProofConfig::n_oods_pow_bits`] is.
+    pub oods_pow_nonce: Option<T>,
+    /// One per FRI layer when [`ProofConfig::n_fold_pow_bits`] is present, empty otherwise.
+    pub fold_pow_nonces: Vec<T>,
     pub fri: FriProof<T>,
 }
 impl<T> Proof<T> {
@@ -433,12 +480,16 @@ impl<T> Proof<T> {
             pow_nonce: _,
             interaction_pow_nonce: _,
             batching_pow_nonce,
+            oods_pow_nonce,
+            fold_pow_nonces,
             fri,
         } = self;
 
         assert_eq!(claimed_sums.len(), config.n_components());
 
         assert_eq!(batching_pow_nonce.is_some(), config.n_batching_pow_bits.is_some());
+        assert_eq!(oods_pow_nonce.is_some(), config.n_oods_pow_bits.is_some());
+        assert_eq!(fold_pow_nonces.len(), config.n_fold_pow_nonces());
 
         // Validate preprocessed_columns_at_oods.
         assert_eq!(preprocessed_columns_at_oods.len(), config.n_preprocessed_columns);
@@ -515,6 +566,8 @@ pub fn empty_proof(config: &ProofConfig) -> Proof<NoValue> {
         pow_nonce: NoValue,
         interaction_pow_nonce: NoValue,
         batching_pow_nonce: config.n_batching_pow_bits.map(|_| NoValue),
+        oods_pow_nonce: config.n_oods_pow_bits.map(|_| NoValue),
+        fold_pow_nonces: vec![NoValue; config.n_fold_pow_nonces()],
         fri: empty_fri_proof(config.log_trace_size, &config.fri),
         channel_salt: NoValue,
     }
@@ -538,6 +591,8 @@ impl<Value: IValue> Guess<Value> for Proof<Value> {
             pow_nonce: self.pow_nonce.guess(context),
             interaction_pow_nonce: self.interaction_pow_nonce.guess(context),
             batching_pow_nonce: self.batching_pow_nonce.map(|nonce| nonce.guess(context)),
+            oods_pow_nonce: self.oods_pow_nonce.map(|nonce| nonce.guess(context)),
+            fold_pow_nonces: self.fold_pow_nonces.guess(context),
             fri: self.fri.guess(context),
             channel_salt: self.channel_salt.guess(context),
         }

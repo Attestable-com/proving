@@ -78,8 +78,10 @@ where
     H::Hash: CairoSerialize + CairoDeserialize,
 {
     assert!(
-        circuit_proof.batching_pow_nonce.is_none(),
-        "the Cairo verifier has no proof of work before the batching coefficient"
+        circuit_proof.batching_pow_nonce.is_none()
+            && circuit_proof.oods_pow_nonce.is_none()
+            && circuit_proof.fold_pow_nonces.is_empty(),
+        "the Cairo verifier has no proof of work inside the STARK proof"
     );
     let [trace_log_sizes, interaction_log_sizes] = column_log_sizes_per_tree(component_log_sizes);
     let stark_proof = CairoStarkProof::<H>::from_stark_proof(

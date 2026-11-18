@@ -28,9 +28,28 @@ pub fn fri_commit(
     channel: &mut Channel,
     proof: &FriCommitProof<Var>,
 ) -> Vec<Var> {
+    fri_commit_with_pow(context, channel, proof, None, &[])
+}
+
+/// [`fri_commit`] with a proof of work of `fold_pow_bits` between every layer's root and its
+/// folding coefficient (`ProofConfig::n_fold_pow_bits`): `fold_pow_nonces` has one nonce per
+/// layer, each checked against the digest that holds the layer's root, then mixed, so every
+/// fresh coefficient costs a fresh grind. `None` is the protocol without it, with no nonce.
+pub fn fri_commit_with_pow(
+    context: &mut Context<impl IValue>,
+    channel: &mut Channel,
+    proof: &FriCommitProof<Var>,
+    fold_pow_bits: Option<u32>,
+    fold_pow_nonces: &[Var],
+) -> Vec<Var> {
+    let n_nonces = if fold_pow_bits.is_some() { proof.layer_commitments.len() } else { 0 };
+    assert_eq!(fold_pow_nonces.len(), n_nonces);
     let mut alphas = Vec::new();
-    for root in &proof.layer_commitments {
+    for (layer, root) in proof.layer_commitments.iter().enumerate() {
         channel.mix_commitment(context, root);
+        if let Some(n_bits) = fold_pow_bits {
+            channel.pow(context, n_bits, fold_pow_nonces[layer]);
+        }
         alphas.push(channel.draw_qm31(context));
     }
     channel.mix_qm31s(context, proof.last_layer_coefs.iter().cloned());

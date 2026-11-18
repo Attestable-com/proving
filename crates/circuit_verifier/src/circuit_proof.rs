@@ -13,6 +13,12 @@ pub struct CircuitProof<H: MerkleHasherLifted> {
     /// The nonce of the proof of work between the sampled values and the batching coefficient,
     /// when the proof was made with one (`circuit_prover::batching_grind`).
     pub batching_pow_nonce: Option<u64>,
+    /// The nonce of the proof of work between the composition root and the OODS point, when
+    /// the proof was made with one.
+    pub oods_pow_nonce: Option<u64>,
+    /// The nonces of the proofs of work between every FRI layer's root and its folding
+    /// coefficient, one per layer, when the proof was made with them; empty otherwise.
+    pub fold_pow_nonces: Vec<u64>,
     pub interaction_claim: CircuitInteractionClaim,
     pub stark_proof: ExtendedStarkProof<H>,
     pub channel_salt: u32,

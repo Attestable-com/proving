@@ -4,7 +4,7 @@ use circuits::context::{Context, FinalizedContext};
 use circuits::ivalue::IValue;
 use circuits::ops::Guess;
 use circuits_stark_verifier::order_hash_map::OrderedHashMap;
-use circuits_stark_verifier::proof::{Proof, ProofConfig};
+use circuits_stark_verifier::proof::{InnerPowBits, Proof, ProofConfig};
 use circuits_stark_verifier::statement::Statement;
 use circuits_stark_verifier::verify::verify;
 use itertools::Itertools;
@@ -57,6 +57,23 @@ pub fn build_verification_circuit_with_batching_pow<Value: IValue>(
     proof: Proof<Value>,
     public_data: CircuitPublicData,
 ) -> Result<FinalizedContext<Value>, String> {
+    build_verification_circuit_with_inner_pows(
+        circuit_config,
+        InnerPowBits { batching: batching_pow_bits, ..InnerPowBits::default() },
+        proof,
+        public_data,
+    )
+}
+
+/// [`build_verification_circuit`] for proofs with the proofs of work of `pow_bits` inside the
+/// STARK proof (before the OODS point, the batching coefficient and every FRI folding
+/// coefficient, each where configured).
+pub fn build_verification_circuit_with_inner_pows<Value: IValue>(
+    circuit_config: CircuitConfig,
+    pow_bits: InnerPowBits,
+    proof: Proof<Value>,
+    public_data: CircuitPublicData,
+) -> Result<FinalizedContext<Value>, String> {
     let mut context = Context::new(N_RESERVED);
     let output_values = public_data
         .output_values
@@ -71,7 +88,7 @@ pub fn build_verification_circuit_with_batching_pow<Value: IValue>(
         &circuit_config.config,
         INTERACTION_POW_BITS,
     );
-    proof_config.n_batching_pow_bits = batching_pow_bits;
+    proof_config.set_inner_pow_bits(pow_bits);
     let proof_vars = proof.guess(&mut context);
 
     verify(&mut context, &proof_vars, &proof_config, &statement);
@@ -110,12 +127,23 @@ pub fn verify_circuit_with_batching_pow(
     proof: Proof<QM31>,
     public_data: CircuitPublicData,
 ) -> Result<FinalizedContext<QM31>, String> {
-    let context = build_verification_circuit_with_batching_pow(
+    verify_circuit_with_inner_pows(
         circuit_config,
-        batching_pow_bits,
+        InnerPowBits { batching: batching_pow_bits, ..InnerPowBits::default() },
         proof,
         public_data,
-    )?;
+    )
+}
+
+/// [`verify_circuit`] for proofs with the proofs of work of `pow_bits` inside the STARK proof.
+pub fn verify_circuit_with_inner_pows(
+    circuit_config: CircuitConfig,
+    pow_bits: InnerPowBits,
+    proof: Proof<QM31>,
+    public_data: CircuitPublicData,
+) -> Result<FinalizedContext<QM31>, String> {
+    let context =
+        build_verification_circuit_with_inner_pows(circuit_config, pow_bits, proof, public_data)?;
     #[cfg(test)]
     context.check_vars_used();
 

@@ -64,9 +64,11 @@ pub fn proof_from_stark_proof(
         },
         pow_nonce: nonce_value(proof.proof.proof_of_work),
         interaction_pow_nonce: nonce_value(interaction_pow_nonce),
-        // The caller sets the nonce of the grind before the batching coefficient, which a stark
-        // proof does not carry.
+        // The caller sets the nonces of the grinds inside the STARK proof, which a stark proof
+        // does not carry.
         batching_pow_nonce: None,
+        oods_pow_nonce: None,
+        fold_pow_nonces: Vec::new(),
         channel_salt: qm31_from_u32s(channel_salt, 0, 0, 0),
     }
 }

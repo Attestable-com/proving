@@ -126,6 +126,11 @@ pub fn deserialize_proof_with_config(
         Some(_) => Some(QM31::deserialize(data)?),
         None => None,
     };
+    let oods_pow_nonce = match config.n_oods_pow_bits {
+        Some(_) => Some(QM31::deserialize(data)?),
+        None => None,
+    };
+    let fold_pow_nonces = deserialize_vec(data, config.n_fold_pow_nonces())?;
     let fri = deserialize_fri_proof(data, config.log_trace_size, &config.fri)?;
 
     Ok(Proof {
@@ -143,6 +148,8 @@ pub fn deserialize_proof_with_config(
         pow_nonce,
         interaction_pow_nonce,
         batching_pow_nonce,
+        oods_pow_nonce,
+        fold_pow_nonces,
         fri,
     })
 }

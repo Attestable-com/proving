@@ -49,6 +49,8 @@ fn test_fri_decommit_with_jumps(
     let config = ProofConfig {
         n_interaction_pow_bits: 0,
         n_batching_pow_bits: None,
+        n_oods_pow_bits: None,
+        n_fold_pow_bits: None,
         n_preprocessed_columns: 0,
         n_trace_columns: 0,
         n_interaction_columns: 0,
